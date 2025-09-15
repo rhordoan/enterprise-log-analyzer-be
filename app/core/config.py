@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import BaseSettings, PostgresDsn
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -14,12 +14,11 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "fastapi"
     POSTGRES_DB: str = "fastapi"
 
-    DATABASE_URL: PostgresDsn | None = None
-    TEST_DATABASE_URL: PostgresDsn | None = None
+    DATABASE_URL: str | None = None
+    TEST_DATABASE_URL: str | None = None
+    REDIS_URL: str = "redis://localhost:6379/0"
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @property
     def sqlalchemy_database_uri(self) -> str:
