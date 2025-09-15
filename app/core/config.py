@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
-    PROJECT_NAME: str = "FastAPI Starter"
+    PROJECT_NAME: str = "Enterprise log analyzer"
     API_PREFIX: str = "/api/v1"
 
     POSTGRES_SERVER: str = "postgres"
