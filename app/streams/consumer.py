@@ -2,6 +2,7 @@ import asyncio
 from contextlib import suppress
 
 import redis.asyncio as aioredis
+from redis.exceptions import ResponseError
 from fastapi import FastAPI
 
 from app.core.config import get_settings
@@ -18,7 +19,7 @@ async def consume_logs():
     # create consumer group if not exists
     try:
         await redis.xgroup_create(STREAM_NAME, GROUP_NAME, id="$", mkstream=True)
-    except aioredis.exceptions.ResponseError:
+    except ResponseError:
         pass
 
     while True:
