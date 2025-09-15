@@ -60,7 +60,6 @@ venv.bak/
 .vscode/
 
 # Docker
-**/Dockerfile*
 .dockerignore
 
 # IDE files
