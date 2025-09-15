@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fastapi
+          POSTGRES_PASSWORD: fastapi
+          POSTGRES_DB: fastapi_test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction --with=dev
+
+      - name: Lint
+        run: poetry run ruff .
+
+      - name: Type check
+        run: poetry run mypy .
+
+      - name: Test
+        env:
+          DATABASE_URL: postgresql+asyncpg://fastapi:fastapi@localhost:5432/fastapi_test
+        run: poetry run pytest -q
