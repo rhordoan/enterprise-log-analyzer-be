@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     CHROMA_COLLECTION_PREFIX: str = "templates_"  # results: templates_macos, templates_linux, templates_windows
 
+    # Redis stream config used by producer/consumer
+    REDIS_URL: str = "redis://redis:6379/0"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @property

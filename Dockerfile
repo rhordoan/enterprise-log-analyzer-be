@@ -5,6 +5,8 @@
 ###############################################
 FROM python:3.11-slim AS builder
 
+ARG DEBIAN_FRONTEND=noninteractive
+
 # Install system dependencies
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential gcc \
@@ -16,7 +18,13 @@ ENV POETRY_VERSION="1.7.1" \
     POETRY_VIRTUALENVS_CREATE=false \
     PIP_NO_CACHE_DIR=1
 
-RUN pip install "poetry==${POETRY_VERSION}"
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install "poetry==${POETRY_VERSION}" poetry-plugin-export
+
+# Create a dedicated virtualenv and use it for installed deps (more reliable copy to runtime)
+RUN python -m venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
 
 # Set working directory
 WORKDIR /app
@@ -24,8 +32,13 @@ WORKDIR /app
 # Copy only dependency declarations first for efficient layer caching
 COPY pyproject.toml poetry.lock* /app/
 
-# Install dependencies (excluding dev dependencies to keep image slim)
-RUN poetry install --no-root --without dev
+# Export and install dependencies into the venv (excluding dev) for portability
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/pypoetry \
+    poetry lock --no-update \
+    && poetry export --without dev -f requirements.txt -o requirements.txt \
+    && pip install -r requirements.txt \
+    && python -c "import uvicorn, aiofiles"
 
 # Copy application code
 COPY . /app
@@ -47,13 +60,16 @@ ENV PYTHONUNBUFFERED=1 \
 # Workdir inside runtime image
 WORKDIR /app
 
-# Copy installed packages from builder stage
-COPY --from=builder /usr/local/lib/python* /usr/local/lib/python*
+# Copy virtualenv with all installed dependencies
+COPY --from=builder /opt/venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
 # Copy project source
 COPY --from=builder /app /app
 
 # Expose port that the service will listen on
 EXPOSE ${PORT}
 
-# Start the application using Uvicorn
-CMD ["uvicorn", "${APP_MODULE}", "--host", "${HOST}", "--port", "${PORT}", "--workers", "2"]
+# Start the application using Uvicorn (use shell to expand env vars reliably)
+CMD ["/bin/sh", "-c", "uvicorn $APP_MODULE --host $HOST --port $PORT --workers 2"]
