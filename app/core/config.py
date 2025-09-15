@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "fastapi"
     POSTGRES_DB: str = "fastapi"
 
-    DATABASE_URL: PostgresDsn | None = None
-    TEST_DATABASE_URL: PostgresDsn | None = None
+    DATABASE_URL: str | None = None
+    TEST_DATABASE_URL: str | None = None
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # Embeddings / Chroma configuration
     CHROMA_MODE: str = "local"  # "local" or "http"

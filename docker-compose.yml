@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+
+  app:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app:ro
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - postgres
+
+  producer:
+    build: .
+    command: python -u app/streams/producer.py
+    volumes:
+      - .:/app:ro
+    depends_on:
+      - redis
