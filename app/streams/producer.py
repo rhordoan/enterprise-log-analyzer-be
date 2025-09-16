@@ -69,16 +69,36 @@ async def _safe_xadd(stream: str, fields: dict, *, retry: int = 1) -> None:
 
 
 async def produce_logs():
-    """Tail each log file under data/ and push lines to Redis Stream concurrently."""
+    """Tail specific log files under data/ and push lines to Redis Stream concurrently.
+
+    The application expects logs to be provided in `data/Linux.log` and
+    `data/Mac.log`. Wait for Redis to be available, log startup info, and
+    then tail the existing files concurrently.
+    """
+    data_dir = Path("data")
+    LOG.info("Starting producer; REDIS_URL=%s data_dir=%s", settings.REDIS_URL, data_dir)
+
+    # Ensure Redis is reachable before starting to tail files
+    await _wait_for_redis()
+
     tasks = []
-    for path in Path("data").glob("*.log"):
-        tasks.append(asyncio.create_task(_tail_file(path)))
+    expected_files = ["Linux.log", "Mac.log"]
+    found_paths = []
+
+    for name in expected_files:
+        path = data_dir / name
+        if path.exists():
+            found_paths.append(path)
+            tasks.append(asyncio.create_task(_tail_file(path)))
+        else:
+            LOG.warning("Expected log file not found: %s", path)
 
     if not tasks:
-        LOG.warning("No log files found in data/ to tail.")
+        LOG.warning("No log files found to tail under %s", data_dir)
         while True:
             await asyncio.sleep(3600)
 
+    LOG.info("Tailing %d files: %s", len(found_paths), ", ".join([p.name for p in found_paths]))
     await asyncio.gather(*tasks)
 
 

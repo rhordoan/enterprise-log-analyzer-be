@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     # Redis stream config used by producer/consumer
     REDIS_URL: str = "redis://redis:6379/0"
 
+    # Collections and streams
+    CHROMA_LOG_COLLECTION_PREFIX: str = "logs_"
+    CHROMA_PROTO_COLLECTION_PREFIX: str = "proto_"
+    ALERTS_CANDIDATES_STREAM: str = "alerts_candidates"
+    ALERTS_STREAM: str = "alerts"
+
+    # Routing / clustering params
+    NEAREST_PROTO_THRESHOLD: float = 0.25  # cosine distance threshold
+    CLUSTER_MIN_SIZE: int = 5
+    CLUSTER_DISTANCE_THRESHOLD: float = 0.3  # max cosine distance intra-cluster
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @property
