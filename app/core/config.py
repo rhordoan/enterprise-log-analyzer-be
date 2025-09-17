@@ -40,11 +40,18 @@ class Settings(BaseSettings):
     CHROMA_PROTO_COLLECTION_PREFIX: str = "proto_"
     ALERTS_CANDIDATES_STREAM: str = "alerts_candidates"
     ALERTS_STREAM: str = "alerts"
+    # Issue grouping streams
+    ISSUES_CANDIDATES_STREAM: str = "issues_candidates"
 
     # Routing / clustering params
     NEAREST_PROTO_THRESHOLD: float = 0.25  # cosine distance threshold
     CLUSTER_MIN_SIZE: int = 5
     CLUSTER_DISTANCE_THRESHOLD: float = 0.3  # max cosine distance intra-cluster
+
+    # Issue aggregation params
+    ISSUE_INACTIVITY_SEC: int = 120  # close issue after N seconds without new logs
+    ISSUE_MAX_LOGS_FOR_LLM: int = 50  # cap logs sent to LLM
+    ENABLE_PER_LINE_CANDIDATES: bool = False  # if true, also publish per-line candidates
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

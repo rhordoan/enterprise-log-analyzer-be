@@ -142,9 +142,10 @@ async def consume_logs():
             if payload["ids"]:
                 collection.upsert(ids=payload["ids"], documents=payload["documents"], metadatas=payload["metadatas"])
 
-        # Publish candidates
-        for c in candidates:
-            await redis.xadd(settings.ALERTS_CANDIDATES_STREAM, c)
+        # Publish per-line candidates if enabled
+        if settings.ENABLE_PER_LINE_CANDIDATES:
+            for c in candidates:
+                await redis.xadd(settings.ALERTS_CANDIDATES_STREAM, c)
 
         # Acknowledge after successful writes
         if ack_ids:
