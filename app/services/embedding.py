@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from typing import Iterable, List
+import json
+import urllib.request
+import urllib.error
+import logging
 
 import numpy as np
+import ollama
 from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 from app.core.config import settings
@@ -53,3 +58,45 @@ class OpenAIEmbeddingFunction:
         return f"openai::{self.model}"
 
 
+class OllamaEmbeddingFunction:
+    """Ollama embeddings adapter using the official ollama python library.
+
+    This implementation performs one request per input string for simplicity
+    and robustness. It returns lists of floats compatible with Chroma's
+    embedding_function interface.
+    """
+
+    def __init__(self, base_url: str, model: str) -> None:
+        self.client = ollama.Client(host=base_url)
+        self.model = model
+        # One-time readiness probe & concise log (no per-request logging)
+        logger = logging.getLogger(__name__)
+        try:
+            info = self.client.list()
+            num_models = len((info or {}).get("models", []))
+            logger.info("ollama embedding provider ready host=%s model=%s models=%d", base_url, model, num_models)
+        except Exception as e:  # pragma: no cover - network
+            logger.info("ollama embedding provider not reachable host=%s model=%s err=%s", base_url, model, e)
+
+    def __call__(self, input: Iterable[str]) -> List[List[float]]:
+        texts = list(input)
+        if not texts:
+            return []
+
+        embeddings: List[List[float]] = []
+        for text in texts:
+            try:
+                response = self.client.embeddings(model=self.model, prompt=text)
+                embedding = response.get("embedding")
+                if not isinstance(embedding, list):
+                     raise RuntimeError("ollama embeddings response missing 'embedding' list")
+                embeddings.append(embedding)
+            except ollama.ResponseError as e:  # pragma: no cover - network
+                raise RuntimeError(f"ollama embeddings API error: {e.error}") from e
+            except Exception as e: # pragma: no cover - unexpected
+                raise RuntimeError(f"An unexpected error occurred with ollama embeddings: {e}") from e
+
+        return embeddings
+
+    def name(self) -> str:  # pragma: no cover - simple getter
+        return f"ollama::{self.model}"

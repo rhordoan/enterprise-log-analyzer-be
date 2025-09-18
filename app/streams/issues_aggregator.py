@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from collections import defaultdict
 from contextlib import suppress
@@ -15,6 +16,7 @@ from app.parsers.templating import render_templated_line
 
 settings = get_settings()
 redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+LOG = logging.getLogger(__name__)
 
 
 def _os_from_source(source: str | None) -> str:
@@ -80,24 +82,26 @@ _issues: Dict[str, Issue] = {}
 
 
 async def _close_and_publish(issue: Issue) -> None:
+    # Serialize logs as JSON; Redis stream field values must be strings
+    logs_list = [
+        {
+            "templated": log["templated"],
+            "raw": log["raw"],
+            "component": log["parsed"].get("component", ""),
+            "pid": log["parsed"].get("PID", ""),
+            "time": log.get("ts", 0),
+        }
+        for log in issue.top_logs(settings.ISSUE_MAX_LOGS_FOR_LLM)
+    ]
     payload = {
         "os": issue.os,
         "issue_key": issue.key,
         # send compact representation: concatenate templated as a rough summary
         "templated_summary": " \n".join([log["templated"] for log in issue.top_logs(settings.ISSUE_MAX_LOGS_FOR_LLM)]),
-        "logs": [
-            {
-                "templated": log["templated"],
-                "raw": log["raw"],
-                # include a small subset of parsed fields
-                "component": log["parsed"].get("component", ""),
-                "pid": log["parsed"].get("PID", ""),
-                "time": log.get("ts", 0),
-            }
-            for log in issue.top_logs(settings.ISSUE_MAX_LOGS_FOR_LLM)
-        ],
+        "logs": __import__("json").dumps(logs_list),
     }
     await redis.xadd(settings.ISSUES_CANDIDATES_STREAM, payload)
+    LOG.info("published issue os=%s key=%s logs=%d", issue.os, issue.key, len(issue.logs))
 
 
 async def run_issues_aggregator() -> None:
@@ -108,18 +112,27 @@ async def run_issues_aggregator() -> None:
     # Create group if it doesn't exist
     try:
         await redis.xgroup_create(stream, group, id="$", mkstream=True)
-    except Exception:
-        pass
+        LOG.info("group created stream=%s group=%s", stream, group)
+    except Exception as exc:
+        LOG.info("group exists stream=%s group=%s info=%s", stream, group, exc)
 
     inactivity = float(settings.ISSUE_INACTIVITY_SEC)
 
+    LOG.info("starting issues aggregator stream=%s group=%s consumer=%s", stream, group, consumer)
     while True:
         # read new messages
-        response = await redis.xreadgroup(group, consumer, {stream: ">"}, count=100, block=1000)
+        try:
+            response = await redis.xreadgroup(group, consumer, {stream: ">"}, count=100, block=1000)
+        except Exception as exc:
+            LOG.info("xreadgroup failed stream=%s group=%s consumer=%s err=%s", stream, group, consumer, exc)
+            await asyncio.sleep(1)
+            continue
         now = time.time()
         if response:
+            processed = 0
             for _, messages in response:
                 for msg_id, data in messages:
+                    processed += 1
                     source = data.get("source")
                     raw = data.get("line") or ""
                     os_name = _os_from_source(source)
@@ -131,6 +144,7 @@ async def run_issues_aggregator() -> None:
                         _issues[key] = issue
                     issue.add_log(raw=raw, templated=templated, parsed=parsed)
                     # We do not ack here; base consumer owns acking, we only observe this stream via separate group
+            LOG.debug("aggregated messages=%d open_issues=%d", processed, len(_issues))
         # periodically close idle issues
         to_close: List[str] = []
         for key, issue in _issues.items():
@@ -142,12 +156,24 @@ async def run_issues_aggregator() -> None:
 
 
 def attach_issues_aggregator(app):
+    async def _run_forever():
+        backoff = 1.0
+        while True:
+            try:
+                await run_issues_aggregator()
+            except Exception as exc:
+                LOG.info("issues aggregator crashed err=%s; restarting in %.1fs", exc, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 10)
+
     @app.on_event("startup")
     async def startup_event():
-        app.state.issues_task = asyncio.create_task(run_issues_aggregator())
+        LOG.info("attaching issues aggregator")
+        app.state.issues_task = asyncio.create_task(_run_forever())
 
     @app.on_event("shutdown")
     async def shutdown_event():
+        LOG.info("stopping issues aggregator")
         app.state.issues_task.cancel()
         with suppress(asyncio.CancelledError):
             await app.state.issues_task

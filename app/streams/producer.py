@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 
 import aiofiles
+from contextlib import suppress
+from fastapi import FastAPI
 import redis.asyncio as aioredis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
@@ -50,7 +52,7 @@ async def _wait_for_redis() -> None:
             LOG.info("Connected to Redis at %s", settings.REDIS_URL)
             return
         except RedisConnectionError as exc:
-            LOG.warning("Redis not available (%s). Retrying in %.1fs...", exc, delay)
+            LOG.info("Redis not available (%s). Retrying in %.1fs...", exc, delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, 5)
 
@@ -60,12 +62,12 @@ async def _safe_xadd(stream: str, fields: dict, *, retry: int = 1) -> None:
     try:
         await redis.xadd(stream, fields, id="*")
     except RedisConnectionError as exc:
-        LOG.warning("xadd failed (%s). Waiting for Redis and retrying...", exc)
+        LOG.info("xadd failed (%s). Waiting for Redis and retrying...", exc)
         await _wait_for_redis()
         if retry > 0:
             await _safe_xadd(stream, fields, retry=retry - 1)
         else:
-            LOG.error("xadd retry exhausted for stream=%s fields=%s", stream, fields)
+            LOG.info("xadd retry exhausted stream=%s fields=%s", stream, fields)
 
 
 async def produce_logs():
@@ -80,6 +82,7 @@ async def produce_logs():
 
     # Ensure Redis is reachable before starting to tail files
     await _wait_for_redis()
+    LOG.info("producer ready; Redis reachable at %s, starting to collect files", settings.REDIS_URL)
 
     tasks = []
     expected_files = ["Linux.log", "Mac.log"]
@@ -91,10 +94,10 @@ async def produce_logs():
             found_paths.append(path)
             tasks.append(asyncio.create_task(_tail_file(path)))
         else:
-            LOG.warning("Expected log file not found: %s", path)
+            LOG.info("Expected log file not found: %s", path)
 
     if not tasks:
-        LOG.warning("No log files found to tail under %s", data_dir)
+        LOG.info("No log files found to tail under %s", data_dir)
         while True:
             await asyncio.sleep(3600)
 
@@ -104,3 +107,30 @@ async def produce_logs():
 
 if __name__ == "__main__":
     asyncio.run(produce_logs())
+
+
+def attach_producer(app: FastAPI):
+    async def _run_forever():
+        backoff = 1.0
+        while True:
+            try:
+                await produce_logs()
+            except Exception as exc:
+                LOG.info("producer crashed err=%s; restarting in %.1fs", exc, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 10)
+
+    @app.on_event("startup")
+    async def startup_event():
+        LOG.info("starting producer (attach_producer called)")
+        app.state.producer_task = asyncio.create_task(_run_forever())
+        LOG.info("producer task created and running in background")
+
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        LOG.info("stopping producer")
+        task = getattr(app.state, "producer_task", None)
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task

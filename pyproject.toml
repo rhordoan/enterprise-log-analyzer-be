@@ -21,6 +21,7 @@ openai = ">=1.40.0"
 sentence-transformers = ">=2.2.2"
 # numpy and scikit-learn are heavy; only needed when using sentence-transformers locally
 # keep them optional to reduce container size and dependency pain
+ollama = "^0.5.4"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.2"

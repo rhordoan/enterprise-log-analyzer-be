@@ -7,9 +7,11 @@ from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
 
 from app.core.config import settings
+import re
 from app.services.embedding import (
     SentenceTransformerEmbeddingFunction,
     OpenAIEmbeddingFunction,
+    OllamaEmbeddingFunction,
 )
 
 
@@ -18,14 +20,25 @@ class ChromaClientProvider:
 
     def __init__(self, embedding_model_name: Optional[str] = None) -> None:
         # Choose embedding provider
-        if settings.EMBEDDING_PROVIDER.lower() == "openai":
+        provider = settings.EMBEDDING_PROVIDER.lower()
+        if provider == "openai":
             self.embedding_fn = OpenAIEmbeddingFunction(
                 model=settings.OPENAI_EMBEDDING_MODEL,
                 api_key=settings.OPENAI_API_KEY,
             )
-        else:
+        elif provider == "sentence-transformers":
             self.embedding_fn = SentenceTransformerEmbeddingFunction(
                 embedding_model_name or settings.EMBEDDING_MODEL_NAME
+            )
+        elif provider == "ollama":
+            self.embedding_fn = OllamaEmbeddingFunction(
+                base_url=settings.OLLAMA_BASE_URL,
+                model=settings.OLLAMA_EMBEDDING_MODEL,
+            )
+        else:
+            raise ValueError(
+                f"Unknown EMBEDDING_PROVIDER '{settings.EMBEDDING_PROVIDER}'. "
+                "Supported: openai, sentence-transformers, ollama"
             )
         self._client = self._create_client()
 
@@ -43,10 +56,20 @@ class ChromaClientProvider:
         return self._client
 
     def get_or_create_collection(self, name: str) -> Collection:
+        # Ensure collections are namespaced by embedding function to avoid
+        # dimension mismatches when switching models/providers.
+        embed_id = getattr(self.embedding_fn, "name", lambda: "unknown")()
+        suffix = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(embed_id)).strip("_")
+        safe_name = f"{name}__{suffix}" if suffix else name
         return self.client.get_or_create_collection(
-            name=name,
+            name=safe_name,
             embedding_function=self.embedding_fn,  # type: ignore[arg-type]
-            metadata={"source": "enterprise-log-analyzer", "type": "template"},
+            metadata={
+                "source": "enterprise-log-analyzer",
+                "type": "template",
+                "embedding_provider": settings.EMBEDDING_PROVIDER,
+                "embedding_id": embed_id,
+            },
         )
 
 

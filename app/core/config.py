@@ -26,14 +26,22 @@ class Settings(BaseSettings):
     CHROMA_SERVER_PORT: int = 8000
 
     # Embedding provider and models
-    EMBEDDING_PROVIDER: str = "openai"  # "openai" or "sentence-transformers"
+    EMBEDDING_PROVIDER: str = "openai"  # "openai" | "sentence-transformers" | "ollama"
     EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"  # used when provider=sentence-transformers
     OPENAI_API_KEY: str | None = None
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    # Ollama config (used when provider=ollama)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"
     CHROMA_COLLECTION_PREFIX: str = "templates_"  # results: templates_macos, templates_linux, templates_windows
 
     # Redis stream config used by producer/consumer
-    REDIS_URL: str = "redis://redis:6379/0"
+    # Default to localhost; override to redis://redis:6379/0 inside Docker Compose
+    # Note: only one REDIS_URL definition is kept to avoid confusion
+    # (previous duplicate caused env overrides to be ignored)
+    #
+    # Example for Compose: set REDIS_URL=redis://redis:6379/0 in .env
+    # Example for local: keep default or set REDIS_URL=redis://localhost:6379/0
 
     # Collections and streams
     CHROMA_LOG_COLLECTION_PREFIX: str = "logs_"
@@ -52,6 +60,10 @@ class Settings(BaseSettings):
     ISSUE_INACTIVITY_SEC: int = 120  # close issue after N seconds without new logs
     ISSUE_MAX_LOGS_FOR_LLM: int = 50  # cap logs sent to LLM
     ENABLE_PER_LINE_CANDIDATES: bool = False  # if true, also publish per-line candidates
+
+    # Background stream toggles
+    ENABLE_PRODUCER: bool = False
+    ENABLE_ENRICHER: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
