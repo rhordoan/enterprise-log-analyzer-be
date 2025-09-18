@@ -42,7 +42,11 @@ class OpenAIEmbeddingFunction:
 
     def __init__(self, model: str, api_key: str | None = None) -> None:
         # OpenAI Python SDK v1 uses client with api_key from env or provided
-        self.client = OpenAI(api_key=api_key or settings.OPENAI_API_KEY)
+        self.client = OpenAI(
+            api_key=api_key or settings.OPENAI_API_KEY,
+            organization=settings.OPENAI_ORG_ID,
+            project=settings.OPENAI_PROJECT,
+        )
         self.model = model
 
     def __call__(self, input: Iterable[str]) -> List[List[float]]:

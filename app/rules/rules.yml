@@ -1,0 +1,43 @@
+rules:
+  - name: disk
+    pattern: >-
+      \b(smart|reallocated|bad sector|io error|i/o error|seek error|read error|write error|fsck|filesystem error|disk failure|block error)\b
+  - name: raid
+    pattern: >-
+      \b(raid degraded|mdadm|array degraded|rebuild failed|missing member|mdmpd failed)\b
+  - name: nvme
+    pattern: >-
+      \b(nvme fatal|nvme error|pci[e]? error|pcie bus error)\b
+  - name: thermal
+    pattern: >-
+      \b(overheat|thermal throttle|temperature limit|over temperature)\b
+  - name: memory
+    pattern: >-
+      \b(ecc error|corrected error|uncorrectable|memtest|oom killer)\b
+  - name: power
+    pattern: >-
+      \b(psu|power loss|brownout|undervoltage|overvoltage)\b
+  - name: cpu
+    pattern: >-
+      \b(mce|machine check|cpu stall|soft lockup|hard lockup)\b
+  - name: network
+    pattern: >-
+      \b(link down|carrier lost|nic failure|packet loss|rx/tx error|internet connection appears to be offline|no network route)\b
+  - name: filesystem
+    pattern: >-
+      \b(EXT3-fs: INFO: recovery required)\b
+  - name: service_failure
+    pattern: >-
+      \b(xinetd.*failed to start|service.*failed to start)\b
+  - name: sandbox
+    pattern: >-
+      \b(deny mach-lookup)\b
+  - name: wifi
+    pattern: >-
+      \b(AssocFail)\b
+  - name: windows_update
+    pattern: >-
+      \b(CBS_E_MANIFEST_INVALID_ITEM|CBS_E_INVALID_PACKAGE)\b
+  - name: storage
+    pattern: >-
+      \b(storvsp)\b

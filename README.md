@@ -23,8 +23,18 @@ LOG_LEVEL=INFO
 SQLALCHEMY_LOG_LEVEL=WARNING
 UVICORN_ACCESS_LOG=false
 
-# Start in-process producer (optional)
+# Start in-process producer / enricher (optional)
 # ENABLE_PRODUCER=1
+# ENABLE_ENRICHER=1
+
+# OpenAI (LLM + embeddings). IMPORTANT: use a Project API key.
+# If your OpenAI account uses Projects, a user key will fail with 401
+# (error code not_authorized_invalid_key_type). Create a Project API key
+# and set the project/org identifiers if required by your setup.
+OPENAI_API_KEY=sk-proj-...
+# Optional but recommended when Projects are enabled:
+# OPENAI_ORG_ID=org_...
+# OPENAI_PROJECT=proj_...
 ```
 
 Docker Compose network (when the API runs inside the `app` service):
@@ -38,8 +48,15 @@ LOG_LEVEL=INFO
 SQLALCHEMY_LOG_LEVEL=WARNING
 UVICORN_ACCESS_LOG=false
 
-# Start in-process producer inside the API container (optional)
+# Start in-process producer/enricher inside the API container (optional)
 # ENABLE_PRODUCER=1
+# ENABLE_ENRICHER=1
+
+# OpenAI (LLM + embeddings)
+OPENAI_API_KEY=sk-proj-...
+# Optional when Projects are enabled:
+# OPENAI_ORG_ID=org_...
+# OPENAI_PROJECT=proj_...
 ```
 
 Notes:
@@ -125,9 +142,34 @@ EMBEDDING_PROVIDER=ollama
 # If provider=sentence-transformers
 EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
 
-# If provider=openai
-OPENAI_API_KEY=sk-...
+# If provider=openai (use a Project API key)
+OPENAI_API_KEY=sk-proj-...
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+# Optional when Projects are enabled
+# OPENAI_ORG_ID=org_...
+# OPENAI_PROJECT=proj_...
+
+#### LLM provider (inference/classification)
+
+Configure which LLM backend to use for classification and hypothesis generation:
+
+```bash
+# Options: openai | ollama (default: openai)
+LLM_PROVIDER=ollama
+
+# If provider=openai (use a Project API key)
+OPENAI_API_KEY=sk-proj-...
+# Optional when Projects are enabled
+# OPENAI_ORG_ID=org_...
+# OPENAI_PROJECT=proj_...
+
+# If provider=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+# Choose an installed chat-capable model
+OLLAMA_CHAT_MODEL=mistral
+```
+
+When `LLM_PROVIDER=ollama`, the system will use the same Ollama endpoint for both embeddings (if `EMBEDDING_PROVIDER=ollama`) and LLM chat inference.
 
 # If provider=ollama
 OLLAMA_BASE_URL=http://localhost:11434

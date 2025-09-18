@@ -2,25 +2,31 @@ from __future__ import annotations
 
 import re
 from typing import Dict, List, Tuple
+import yaml
+from pathlib import Path
 
 
-_RULES: List[Tuple[str, re.Pattern[str]]] = [
-    (
-        "disk",
-        re.compile(
-            r"\b(smart|reallocated|bad sector|io error|i/o error|seek error|read error|write error|fsck|filesystem error|disk failure|block error)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    ("raid", re.compile(r"\b(raid degraded|mdadm|array degraded|rebuild failed|missing member)\b", re.IGNORECASE)),
-    ("nvme", re.compile(r"\b(nvme fatal|nvme error|pci[e]? error|pcie bus error)\b", re.IGNORECASE)),
-    ("thermal", re.compile(r"\b(overheat|thermal throttle|temperature limit|over temperature)\b", re.IGNORECASE)),
-    ("memory", re.compile(r"\b(ecc error|corrected error|uncorrectable|memtest|oom killer)\b", re.IGNORECASE)),
-    ("power", re.compile(r"\b(psu|power loss|brownout|undervoltage|overvoltage)\b", re.IGNORECASE)),
-    ("cpu", re.compile(r"\b(mce|machine check|cpu stall|soft lockup|hard lockup)\b", re.IGNORECASE)),
-    ("network", re.compile(r"\b(link down|carrier lost|nic failure|packet loss|rx/tx error)\b", re.IGNORECASE)),
-]
+_RULES_FILE = Path(__file__).parent.parent / "rules" / "rules.yml"
 
+
+def load_rules() -> List[Tuple[str, re.Pattern[str]]]:
+    """Load rules from the YAML file."""
+    if not _RULES_FILE.exists():
+        return []
+    with open(_RULES_FILE, "r") as f:
+        data = yaml.safe_load(f)
+
+    rules = []
+    for rule in data.get("rules", []):
+        rules.append(
+            (
+                rule["name"],
+                re.compile(rule["pattern"], re.IGNORECASE),
+            )
+        )
+    return rules
+
+_RULES = load_rules()
 
 def match_failure_signals(text: str) -> Dict[str, object]:
     """Return quick rule-based signal for potential hardware failures.

@@ -10,6 +10,7 @@ from app.streams.issues_aggregator import attach_issues_aggregator
 from app.db.init_db import init_db
 from app.streams.producer import attach_producer
 from app.streams.enricher import attach_enricher
+from app.services.prototype_improver import attach_prototype_improver
 import logging
 
 LOG = logging.getLogger(__name__)
@@ -37,6 +38,26 @@ app.add_middleware(
 async def _init_db_event():
     await init_db()
 
+
+def _mask_api_key(value: str | None) -> str:
+    if not value:
+        return "-"
+    v = str(value)
+    if len(v) <= 10:
+        return v[:2] + "***" + v[-2:]
+    return v[:6] + "***" + v[-4:]
+
+
+@app.on_event("startup")
+async def _log_llm_configuration():
+    masked_key = _mask_api_key(settings.OPENAI_API_KEY)
+    LOG.info(
+        "LLM configuration provider=%s openai_model=%s openai_api_key=%s",
+        settings.LLM_PROVIDER,
+        getattr(settings, "OPENAI_CHAT_MODEL", "-"),
+        masked_key,
+    )
+
 attach_consumer(app)
 LOG.info("consumer attachment registered")
 attach_issues_aggregator(app)
@@ -51,6 +72,9 @@ if settings.ENABLE_PRODUCER:
 if settings.ENABLE_ENRICHER:
     attach_enricher(app)
     LOG.info("enricher attachment registered (ENABLE_ENRICHER=%s)", settings.ENABLE_ENRICHER)
+
+attach_prototype_improver(app)
+
 # Mount versioned API router
 app.include_router(api_router, prefix=settings.API_PREFIX)
 

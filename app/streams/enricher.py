@@ -126,6 +126,7 @@ async def run_enricher():
                     is_hw = bool(result.get("is_hardware_failure"))
                     failure_type = str(result.get("failure_type", ""))
                     confidence = result.get("confidence")
+                    log_ids = [log.get("id") for log in logs if log.get("id")]
                     payload = {
                         "type": "issue",
                         "os": os_name,
@@ -134,8 +135,18 @@ async def run_enricher():
                         "failure_type": failure_type,
                         "confidence": str(confidence) if confidence is not None else "",
                         "result": json.dumps(result),
+                        "log_ids": json.dumps(log_ids),
                     }
-                    await redis.xadd(settings.ALERTS_STREAM, payload)
+                    entry_id = await redis.xadd(settings.ALERTS_STREAM, payload)
+                    # Mirror alert into a hash with a TTL for ~24h visibility; allow persisting later
+                    try:
+                        key = f"alert:{entry_id}"
+                        # Store fields as strings for consistency
+                        to_store = {**payload, "id": entry_id}
+                        await redis.hset(key, mapping=to_store)
+                        await redis.expire(key, int(settings.ALERTS_TTL_SEC))
+                    except Exception as e:
+                        LOG.info("failed to store alert hash id=%s err=%s", entry_id, e)
                 except Exception as exc:
                     LOG.info("enricher processing failed id=%s err=%s", msg_id, exc)
                 finally:

@@ -29,10 +29,16 @@ class Settings(BaseSettings):
     EMBEDDING_PROVIDER: str = "openai"  # "openai" | "sentence-transformers" | "ollama"
     EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"  # used when provider=sentence-transformers
     OPENAI_API_KEY: str | None = None
+    OPENAI_ORG_ID: str | None = None
+    OPENAI_PROJECT: str | None = None
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
     # Ollama config (used when provider=ollama)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"
+    # LLM provider and models (inference/classification)
+    LLM_PROVIDER: str = "openai"  # "openai" | "ollama"
+    OLLAMA_CHAT_MODEL: str = "mistral"
     CHROMA_COLLECTION_PREFIX: str = "templates_"  # results: templates_macos, templates_linux, templates_windows
 
     # Redis stream config used by producer/consumer
@@ -48,13 +54,22 @@ class Settings(BaseSettings):
     CHROMA_PROTO_COLLECTION_PREFIX: str = "proto_"
     ALERTS_CANDIDATES_STREAM: str = "alerts_candidates"
     ALERTS_STREAM: str = "alerts"
+    ALERTS_TTL_SEC: int = 60 * 60 * 24  # 24h
+    ALERTS_PERSISTED_SET: str = "alerts:persisted"
+    ALERTS_FEEDBACK_CORRECT_SET: str = "alerts:feedback:correct"
+    ALERTS_FEEDBACK_INCORRECT_SET: str = "alerts:feedback:incorrect"
+
+    # Prototype improver
+    ENABLE_PROTOTYPE_IMPROVER: bool = False
+    PROTOTYPE_IMPROVER_INTERVAL_SEC: int = 60 * 60  # 1 hour
+
     # Issue grouping streams
     ISSUES_CANDIDATES_STREAM: str = "issues_candidates"
 
     # Routing / clustering params
     NEAREST_PROTO_THRESHOLD: float = 0.25  # cosine distance threshold
     CLUSTER_MIN_SIZE: int = 5
-    CLUSTER_DISTANCE_THRESHOLD: float = 0.3  # max cosine distance intra-cluster
+    CLUSTER_DISTANCE_THRESHOLD: float = 0.2  # max cosine distance intra-cluster
 
     # Issue aggregation params
     ISSUE_INACTIVITY_SEC: int = 120  # close issue after N seconds without new logs
