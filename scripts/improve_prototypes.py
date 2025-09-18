@@ -7,14 +7,13 @@ from typing import Any, Dict, List
 import redis.asyncio as aioredis
 
 from app.core.config import get_settings
-from app.services.chroma_service import ChromaClientProvider, collection_name_for_os
+from app.services.chroma_service import ChromaClientProvider
 from app.services.clustering_service import (
     _logs_collection_name,
     _single_pass_cluster,
     build_prototypes,
     upsert_prototypes,
 )
-from app.services.embedding import get_embedding_model
 
 
 LOG = logging.getLogger(__name__)
@@ -134,3 +133,4 @@ async def improve_prototypes():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     asyncio.run(improve_prototypes())
+

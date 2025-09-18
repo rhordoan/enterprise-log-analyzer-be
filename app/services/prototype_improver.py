@@ -44,3 +44,4 @@ def attach_prototype_improver(app: FastAPI):
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
+
