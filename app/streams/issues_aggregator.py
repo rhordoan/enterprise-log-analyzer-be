@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.parsers.linux import parse_linux_line
 from app.parsers.macos import parse_macos_line
 from app.parsers.templating import render_templated_line
+import threading
 
 
 settings = get_settings()
@@ -168,14 +169,27 @@ def attach_issues_aggregator(app):
 
     @app.on_event("startup")
     async def startup_event():
-        LOG.info("attaching issues aggregator")
-        app.state.issues_task = asyncio.create_task(_run_forever())
+        LOG.info("starting issues aggregator in dedicated thread")
+        loop = asyncio.new_event_loop()
+
+        def _runner():
+            asyncio.set_event_loop(loop)
+            loop.create_task(_run_forever())
+            loop.run_forever()
+
+        thread = threading.Thread(target=_runner, name="issues-aggregator-thread", daemon=True)
+        thread.start()
+        app.state.issues_loop = loop
+        app.state.issues_thread = thread
 
     @app.on_event("shutdown")
     async def shutdown_event():
-        LOG.info("stopping issues aggregator")
-        app.state.issues_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await app.state.issues_task
+        LOG.info("stopping issues aggregator thread")
+        loop = getattr(app.state, "issues_loop", None)
+        thread = getattr(app.state, "issues_thread", None)
+        if loop is not None:
+            loop.call_soon_threadsafe(loop.stop)
+        if thread is not None:
+            thread.join(timeout=5)
 
 

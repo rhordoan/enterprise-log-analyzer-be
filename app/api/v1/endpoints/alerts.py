@@ -44,17 +44,41 @@ async def list_alerts(limit: int = Query(100, ge=1, le=1000)) -> List[Dict[str, 
 
     seen_ids: set[str] = set()
     out: List[Dict[str, Any]] = []
-    for entry_id, fields in stream_entries:
-        seen_ids.add(entry_id)
-        result_obj = _parse_result(fields.get("result"))
-        out.append({
-            "id": entry_id,
-            "type": fields.get("type", ""),
-            "os": fields.get("os", ""),
-            "issue_key": fields.get("issue_key", ""),
-            "result": result_obj,
-            "persisted": (entry_id in persisted_ids),
-        })
+    
+    # OPTIMIZATION: Pipeline hash fetches for stream entries to get enriched data
+    # Stream entries might have limited fields, but hashes have complete alert data
+    if stream_entries:
+        pipe = redis.pipeline(transaction=False)
+        for entry_id, _ in stream_entries:
+            pipe.hgetall(f"alert:{entry_id}")
+        
+        hash_results = await pipe.execute()
+        
+        for (entry_id, stream_fields), hash_data in zip(stream_entries, hash_results):
+            seen_ids.add(entry_id)
+            
+            # Prefer hash data if available (more complete), fallback to stream fields
+            if hash_data:
+                result_obj = _parse_result(hash_data.get("result"))
+                out.append({
+                    "id": entry_id,
+                    "type": hash_data.get("type", ""),
+                    "os": hash_data.get("os", ""),
+                    "issue_key": hash_data.get("issue_key", ""),
+                    "result": result_obj,
+                    "persisted": (entry_id in persisted_ids),
+                })
+            else:
+                # Fallback to stream data if hash doesn't exist
+                result_obj = _parse_result(stream_fields.get("result"))
+                out.append({
+                    "id": entry_id,
+                    "type": stream_fields.get("type", ""),
+                    "os": stream_fields.get("os", ""),
+                    "issue_key": stream_fields.get("issue_key", ""),
+                    "result": result_obj,
+                    "persisted": (entry_id in persisted_ids),
+                })
 
     # If we still need more, include older persisted alerts (outside TTL)
     remaining = max(0, limit - len(out))

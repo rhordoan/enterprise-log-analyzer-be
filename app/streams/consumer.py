@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import redis.asyncio as aioredis
 from redis.exceptions import ResponseError
 from fastapi import FastAPI
+import threading
 
 from app.core.config import get_settings
 from app.services.chroma_service import ChromaClientProvider
@@ -198,11 +199,25 @@ def attach_consumer(app: FastAPI):
 
     @app.on_event("startup")
     async def startup_event():
-        app.state.consumer_task = asyncio.create_task(_run_forever())
+        LOG.info("starting consumer in dedicated thread")
+        loop = asyncio.new_event_loop()
+
+        def _runner():
+            asyncio.set_event_loop(loop)
+            loop.create_task(_run_forever())
+            loop.run_forever()
+
+        thread = threading.Thread(target=_runner, name="consumer-thread", daemon=True)
+        thread.start()
+        app.state.consumer_loop = loop
+        app.state.consumer_thread = thread
 
     @app.on_event("shutdown")
     async def shutdown_event():
-        LOG.info("stopping consumer")
-        app.state.consumer_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await app.state.consumer_task
+        LOG.info("stopping consumer thread")
+        loop = getattr(app.state, "consumer_loop", None)
+        thread = getattr(app.state, "consumer_thread", None)
+        if loop is not None:
+            loop.call_soon_threadsafe(loop.stop)
+        if thread is not None:
+            thread.join(timeout=5)

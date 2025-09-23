@@ -8,6 +8,7 @@ from contextlib import suppress
 from fastapi import FastAPI
 import redis.asyncio as aioredis
 from redis.exceptions import ConnectionError as RedisConnectionError
+import threading
 
 from app.core.config import get_settings
 
@@ -122,15 +123,25 @@ def attach_producer(app: FastAPI):
 
     @app.on_event("startup")
     async def startup_event():
-        LOG.info("starting producer (attach_producer called)")
-        app.state.producer_task = asyncio.create_task(_run_forever())
-        LOG.info("producer task created and running in background")
+        LOG.info("starting producer in dedicated thread")
+        loop = asyncio.new_event_loop()
+
+        def _runner():
+            asyncio.set_event_loop(loop)
+            loop.create_task(_run_forever())
+            loop.run_forever()
+
+        thread = threading.Thread(target=_runner, name="producer-thread", daemon=True)
+        thread.start()
+        app.state.producer_loop = loop
+        app.state.producer_thread = thread
 
     @app.on_event("shutdown")
     async def shutdown_event():
-        LOG.info("stopping producer")
-        task = getattr(app.state, "producer_task", None)
-        if task is not None:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+        LOG.info("stopping producer thread")
+        loop = getattr(app.state, "producer_loop", None)
+        thread = getattr(app.state, "producer_thread", None)
+        if loop is not None:
+            loop.call_soon_threadsafe(loop.stop)
+        if thread is not None:
+            thread.join(timeout=5)

@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.services.llm_service import classify_failure, generate_hypothesis, classify_issue
 from app.services.chroma_service import ChromaClientProvider, collection_name_for_os
 from app.core.config import settings as global_settings
+import threading
 
 
 settings = get_settings()
@@ -173,17 +174,27 @@ def attach_enricher(app: FastAPI):
 
     @app.on_event("startup")
     async def startup_event():
-        LOG.info("starting enricher (attach_enricher called)")
-        app.state.enricher_task = asyncio.create_task(_run_forever())
-        LOG.info("enricher task created and running in background")
+        LOG.info("starting enricher in dedicated thread")
+        loop = asyncio.new_event_loop()
+
+        def _runner():
+            asyncio.set_event_loop(loop)
+            loop.create_task(_run_forever())
+            loop.run_forever()
+
+        thread = threading.Thread(target=_runner, name="enricher-thread", daemon=True)
+        thread.start()
+        app.state.enricher_loop = loop
+        app.state.enricher_thread = thread
 
     @app.on_event("shutdown")
     async def shutdown_event():
-        LOG.info("stopping enricher")
-        task = getattr(app.state, "enricher_task", None)
-        if task is not None:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+        LOG.info("stopping enricher thread")
+        loop = getattr(app.state, "enricher_loop", None)
+        thread = getattr(app.state, "enricher_thread", None)
+        if loop is not None:
+            loop.call_soon_threadsafe(loop.stop)
+        if thread is not None:
+            thread.join(timeout=5)
 
 

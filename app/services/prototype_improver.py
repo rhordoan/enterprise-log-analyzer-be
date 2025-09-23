@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import suppress
+import threading
 
 from fastapi import FastAPI
 
@@ -30,18 +31,29 @@ def attach_prototype_improver(app: FastAPI):
     @app.on_event("startup")
     async def startup_event():
         if settings.ENABLE_PROTOTYPE_IMPROVER:
-            LOG.info("Starting prototype improver background task.")
-            app.state.prototype_improver_task = asyncio.create_task(_run_forever())
+            LOG.info("Starting prototype improver background thread.")
+            loop = asyncio.new_event_loop()
+
+            def _runner():
+                asyncio.set_event_loop(loop)
+                loop.create_task(_run_forever())
+                loop.run_forever()
+
+            thread = threading.Thread(target=_runner, name="prototype-improver-thread", daemon=True)
+            thread.start()
+            app.state.prototype_improver_loop = loop
+            app.state.prototype_improver_thread = thread
         else:
             LOG.info("Prototype improver is disabled.")
 
     @app.on_event("shutdown")
     async def shutdown_event():
         if settings.ENABLE_PROTOTYPE_IMPROVER:
-            LOG.info("Stopping prototype improver background task.")
-            task = getattr(app.state, "prototype_improver_task", None)
-            if task is not None:
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
+            LOG.info("Stopping prototype improver background thread.")
+            loop = getattr(app.state, "prototype_improver_loop", None)
+            thread = getattr(app.state, "prototype_improver_thread", None)
+            if loop is not None:
+                loop.call_soon_threadsafe(loop.stop)
+            if thread is not None:
+                thread.join(timeout=5)
 
