@@ -11,6 +11,7 @@ from app.db.init_db import init_db
 from app.streams.producer import attach_producer
 from app.streams.enricher import attach_enricher
 from app.services.prototype_improver import attach_prototype_improver
+from app.services.llm_service import llm_healthcheck
 from app.streams.producer_manager import attach_producers
 from app.streams.automations import attach_automations
 import logging
@@ -59,6 +60,22 @@ async def _log_llm_configuration():
         getattr(settings, "OPENAI_CHAT_MODEL", "-"),
         masked_key,
     )
+    # Log .env presence for troubleshooting
+    try:
+        from pathlib import Path as _Path
+        env_here = _Path.cwd() / ".env"
+        LOG.info(".env present=%s path=%s", env_here.exists(), str(env_here))
+    except Exception:
+        pass
+    # Proactive LLM health check
+    try:
+        hc = llm_healthcheck()
+        if hc.get("ok"):
+            LOG.info("LLM healthcheck ok provider=%s model=%s", hc.get("provider"), hc.get("model"))
+        else:
+            LOG.error("LLM healthcheck failed provider=%s model=%s err=%s", hc.get("provider"), hc.get("model"), hc.get("error"))
+    except Exception as exc:
+        LOG.error("LLM healthcheck raised error err=%s", exc)
 
 attach_consumer(app)
 LOG.info("consumer attachment registered")

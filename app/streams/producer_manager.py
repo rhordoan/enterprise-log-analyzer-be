@@ -31,6 +31,7 @@ class ProducerManager:
         self.thread: threading.Thread | None = None
         self.tasks: dict[int, asyncio.Task] = {}
         self.instances: dict[int, object] = {}
+        self._heartbeat_interval_seconds: float = 60.0
 
     async def _run_with_restart(self, source_id: int, instance: object) -> None:
         backoff = 1.0
@@ -57,10 +58,38 @@ class ProducerManager:
 
         def _runner() -> None:
             asyncio.set_event_loop(self.loop)
+            # Start heartbeat task in the producers loop
+            self.loop.create_task(self._heartbeat())
             self.loop.run_forever()
 
         self.thread = threading.Thread(target=_runner, name="producers-thread", daemon=True)
         self.thread.start()
+
+    async def _heartbeat(self) -> None:
+        """Log active producer count and identities periodically."""
+        while True:
+            try:
+                active_ids = list(self.tasks.keys())
+                num_active = len(active_ids)
+                details: list[str] = []
+                for rid in active_ids:
+                    inst = self.instances.get(rid)
+                    if inst is None:
+                        details.append(f"{rid}:-")
+                    else:
+                        ptype = getattr(inst, "name", inst.__class__.__name__)
+                        details.append(f"{rid}:{ptype}")
+                LOG.info(
+                    "producers heartbeat active=%d running=%s",
+                    num_active,
+                    ", ".join(details) if details else "-",
+                )
+                await asyncio.sleep(self._heartbeat_interval_seconds)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:  # noqa: BLE001
+                LOG.info("producers heartbeat error=%s", exc)
+                await asyncio.sleep(self._heartbeat_interval_seconds)
 
     def start(self, source_id: int, type_: str, config: dict) -> None:
         if self.loop is None:

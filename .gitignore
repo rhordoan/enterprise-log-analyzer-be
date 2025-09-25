@@ -69,3 +69,4 @@ venv.bak/
 alembic/versions/*.pyc
 
 .chroma
+/.chroma

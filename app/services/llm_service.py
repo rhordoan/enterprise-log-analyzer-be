@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
+import logging
 import json
 
 from openai import OpenAI
 import ollama
 
 from app.core.config import settings
+
+
+LOG = logging.getLogger(__name__)
 
 
 _client: OpenAI | None = None
@@ -50,6 +54,7 @@ def _chat_json_with_openai(system: str, user_prompt: str) -> Dict[str, Any]:
         return json.loads(content)
     except Exception as e:
         # Fallback for API errors or other issues
+        LOG.error("LLM(OpenAI) chat failed model=%s err=%s", settings.OPENAI_CHAT_MODEL, e)
         return {"raw": str(e), "error": "OpenAI API call failed."}
 
 
@@ -82,6 +87,7 @@ def _chat_json_with_ollama(system: str, user_prompt: str, temperature: float) ->
             text = resp.get("message", {}).get("content", "")
         else:
             text = str(e) # The error was likely in the API call itself
+        LOG.error("LLM(Ollama) chat failed model=%s err=%s", settings.OLLAMA_CHAT_MODEL, e)
         return {"raw": text, "error": "Failed to get or parse Ollama response."}
 
 
@@ -91,6 +97,16 @@ SYSTEM = "You are an SRE assistant. Respond ONLY with valid JSON."
 def classify_failure(os_name: str, raw: str, templated: str, neighbors: List[Dict[str, Any]]) -> Dict[str, Any]:
     """LLM-based classification for hardware failure likelihood with structured JSON output."""
     examples = "\n".join([f"- {n.get('document', '')}" for n in neighbors[:5]])
+    # Expanded failure type taxonomy to capture a broader set of common incident categories.
+    # Keep this list in sync with rule labels in app/rules/rules.yml when practical.
+    # Note: Use lowercase, single tokens where possible for stability.
+    failure_types = "|".join([
+        "disk", "storage", "raid", "nvme", "filesystem", "io",
+        "cpu", "memory", "network", "power", "thermal", "wifi",
+        "windows_update", "service_failure", "sandbox",
+        "application", "configuration", "security", "dependency",
+        "kernel", "driver", "os_update", "unknown"
+    ])
     prompt = f"""
 OS: {os_name}
 Current log (templated): {templated}
@@ -101,7 +117,7 @@ Similar known templates/logs:
 Return JSON with:
 {{
   "is_hardware_failure": true|false,
-  "failure_type": "disk|memory|cpu|io|network|power|unknown",
+  "failure_type": "{failure_types}",
   "confidence": 0..1,
   "evidence": ["..."],
   "recommendation": "..."
@@ -147,6 +163,14 @@ def classify_issue(os_name: str, top_logs: List[Dict[str, Any]], neighbors: List
     examples = "\n".join([f"- {n.get('document', '')}" for n in neighbors[:8]])
     recent = "\n".join([f"- {l.get('templated','')}" for l in top_logs[:50]])
     extra = "\n".join([f"- {l.get('templated','')}" for l in retrieved_logs[:20]])
+    # Expanded failure type taxonomy (keep aligned with classify_failure)
+    failure_types = "|".join([
+        "disk", "storage", "raid", "nvme", "filesystem", "io",
+        "cpu", "memory", "network", "power", "thermal", "wifi",
+        "windows_update", "service_failure", "sandbox",
+        "application", "configuration", "security", "dependency",
+        "kernel", "driver", "os_update", "unknown"
+    ])
     prompt = f"""
 OS: {os_name}
 Issue logs (templated):
@@ -161,7 +185,7 @@ Additional retrieved logs:
 Return JSON with:
 {{
   "is_hardware_failure": true|false,
-  "failure_type": "disk|memory|cpu|io|network|power|unknown",
+  "failure_type": "{failure_types}",
   "confidence": 0..1,
   "top_signals": ["..."],
   "summary": "...",
@@ -173,3 +197,32 @@ Only JSON; no extra text.
         return _chat_json_with_ollama(SYSTEM, prompt, temperature=0.3)
     else:
         return _chat_json_with_openai(SYSTEM, prompt)
+
+
+def llm_healthcheck() -> Dict[str, Any]:
+    """Attempt a minimal LLM call to verify availability; logs success/failure.
+
+    Returns a dict like {"ok": bool, "provider": str, "model": str, "error": str|None}
+    """
+    system = "You are a healthcheck. Respond with JSON."
+    prompt = "Return {\"ok\": true} as valid JSON only."
+    try:
+        if settings.LLM_PROVIDER == "ollama":
+            res = _chat_json_with_ollama(system, prompt, temperature=0.0)
+            ok = isinstance(res, dict) and bool(res.get("ok") is True)
+            if ok:
+                LOG.info("LLM health ok provider=ollama model=%s", settings.OLLAMA_CHAT_MODEL)
+                return {"ok": True, "provider": "ollama", "model": settings.OLLAMA_CHAT_MODEL}
+            LOG.error("LLM health unexpected response provider=ollama model=%s resp=%s", settings.OLLAMA_CHAT_MODEL, res)
+            return {"ok": False, "provider": "ollama", "model": settings.OLLAMA_CHAT_MODEL, "error": "unexpected_response"}
+        else:
+            res = _chat_json_with_openai(system, prompt)
+            ok = isinstance(res, dict) and bool(res.get("ok") is True)
+            if ok:
+                LOG.info("LLM health ok provider=openai model=%s", settings.OPENAI_CHAT_MODEL)
+                return {"ok": True, "provider": "openai", "model": settings.OPENAI_CHAT_MODEL}
+            LOG.error("LLM health unexpected response provider=openai model=%s resp=%s", settings.OPENAI_CHAT_MODEL, res)
+            return {"ok": False, "provider": "openai", "model": settings.OPENAI_CHAT_MODEL, "error": "unexpected_response"}
+    except Exception as e:
+        LOG.error("LLM health failed provider=%s err=%s", settings.LLM_PROVIDER, e)
+        return {"ok": False, "provider": settings.LLM_PROVIDER, "model": (settings.OLLAMA_CHAT_MODEL if settings.LLM_PROVIDER=="ollama" else settings.OPENAI_CHAT_MODEL), "error": str(e)}
