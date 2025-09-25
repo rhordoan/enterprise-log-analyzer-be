@@ -1,0 +1,31 @@
+rules:
+  - id: example_disk_replace_ansible
+    match:
+      failure_type: "storage"
+      min_confidence: 0.8
+    action:
+      provider: "ansible_tower"
+      params:
+        base_url: "https://tower.example.com"
+        job_template_id: 42
+        extra_vars:
+          incident_id: "{{ alert.id }}"
+          issue_key: "{{ alert.issue_key }}"
+    cooldown: "30m"
+
+  - id: example_servicenow_incident
+    match:
+      failure_type: "power"
+      min_confidence: 0.7
+    action:
+      provider: "servicenow"
+      params:
+        base_url: "https://instance.service-now.com"
+        table: "incident"
+        payload:
+          short_description: "Auto: {{ alert.failure_type }} on {{ alert.os }}"
+          description: "Issue {{ alert.issue_key }} | confidence={{ alert.confidence }}"
+          urgency: "2"
+    cooldown: "15m"
+
+

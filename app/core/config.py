@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # Collections and streams
     CHROMA_LOG_COLLECTION_PREFIX: str = "logs_"
     CHROMA_PROTO_COLLECTION_PREFIX: str = "proto_"
+
+    # Metrics normalization and export
+    ENABLE_METRICS_NORMALIZATION: bool = True
+    ENABLE_OTEL_EXPORT: bool = False
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://localhost:4318/v1/metrics"
+    OTEL_SERVICE_NAME: str = "enterprise-log-analyzer"
     ALERTS_CANDIDATES_STREAM: str = "alerts_candidates"
     ALERTS_STREAM: str = "alerts"
     ALERTS_TTL_SEC: int = 60 * 60 * 24  # 24h
@@ -79,6 +85,8 @@ class Settings(BaseSettings):
     # Background stream toggles
     ENABLE_PRODUCER: bool = False
     ENABLE_ENRICHER: bool = False
+    ENABLE_AUTOMATIONS: bool = False
+    AUTOMATIONS_DRY_RUN: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

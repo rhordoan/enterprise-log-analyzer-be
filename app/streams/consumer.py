@@ -16,6 +16,10 @@ from app.services.prototype_router import nearest_prototype
 from app.parsers.linux import parse_linux_line
 from app.parsers.macos import parse_macos_line
 from app.parsers.templating import render_templated_line
+from app.services.metrics_normalization import normalize
+from app.services.otel_exporter import export_metrics
+from app.db.session import AsyncSessionLocal
+from app.models.data_source import DataSource
 
 settings = get_settings()
 redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -23,6 +27,7 @@ redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
 STREAM_NAME = "logs"
 GROUP_NAME = "log_consumers"
 CONSUMER_NAME = "consumer_1"
+METRICS_STREAM = "metrics"
 
 _provider: ChromaClientProvider | None = None
 LOG = logging.getLogger(__name__)
@@ -109,6 +114,50 @@ async def consume_logs():
                     total_msgs += 1
                     source = data.get("source")
                     line = data.get("line") or ""
+                    kind = (source or "").split(":", 1)[0]
+
+                    # Normalize metrics for supported kinds and optionally export to OTel
+                    if settings.ENABLE_METRICS_NORMALIZATION and kind in {"snmp", "dcim_http"}:
+                        payload_obj = None
+                        try:
+                            import json as _json
+                            payload_obj = _json.loads(line)
+                        except Exception:
+                            payload_obj = None
+                        if isinstance(payload_obj, dict):
+                            # find DataSource config by source_id if present
+                            cfg: Dict[str, Any] = {}
+                            try:
+                                src_id_str = data.get("source_id")
+                                if src_id_str:
+                                    src_id = int(src_id_str)
+                                    async with AsyncSessionLocal() as db:  # type: ignore
+                                        row = await db.get(DataSource, src_id)
+                                    if row and isinstance(row.config, dict):
+                                        cfg = row.config
+                            except Exception:
+                                cfg = {}
+                            points = normalize(kind, payload_obj, cfg or {})
+                            if points:
+                                # Export to OTEL if enabled
+                                export_metrics(points)
+                                # Also write to Redis metrics stream for internal uses
+                                for mp in points:
+                                    try:
+                                        import json as _json
+                                        await redis.xadd(METRICS_STREAM, {
+                                            "name": mp.get("name", ""),
+                                            "type": mp.get("type", "gauge"),
+                                            "value": str(mp.get("value", "")),
+                                            "unit": (mp.get("unit") or ""),
+                                            "resource": _json.dumps(mp.get("resource") or {}),
+                                            "attributes": _json.dumps(mp.get("attributes") or {}),
+                                        })
+                                    except Exception:
+                                        pass
+                                # Metrics processed; ack and skip log path
+                                ack_ids.append(msg_id)
+                                continue
                     os_name = _os_from_source(source)
                     templated, parsed = _parse_and_template(os_name, line)
 

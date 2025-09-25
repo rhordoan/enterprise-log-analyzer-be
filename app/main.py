@@ -11,6 +11,8 @@ from app.db.init_db import init_db
 from app.streams.producer import attach_producer
 from app.streams.enricher import attach_enricher
 from app.services.prototype_improver import attach_prototype_improver
+from app.streams.producer_manager import attach_producers
+from app.streams.automations import attach_automations
 import logging
 
 LOG = logging.getLogger(__name__)
@@ -63,10 +65,9 @@ LOG.info("consumer attachment registered")
 attach_issues_aggregator(app)
 LOG.info("issues aggregator attachment registered")
 
-# Optionally start the producer when ENABLE_PRODUCER is true
-if settings.ENABLE_PRODUCER:
-    attach_producer(app)
-    LOG.info("producer attachment registered (ENABLE_PRODUCER=%s)", settings.ENABLE_PRODUCER)
+# Start modular producers based on DB-configured sources
+attach_producers(app)
+LOG.info("modular producers attachment registered")
 
 # Optionally start the enricher when ENABLE_ENRICHER is true
 if settings.ENABLE_ENRICHER:
@@ -74,6 +75,11 @@ if settings.ENABLE_ENRICHER:
     LOG.info("enricher attachment registered (ENABLE_ENRICHER=%s)", settings.ENABLE_ENRICHER)
 
 attach_prototype_improver(app)
+
+# Optionally start automations when ENABLE_AUTOMATIONS is true
+if settings.ENABLE_AUTOMATIONS:
+    attach_automations(app)
+    LOG.info("automations attachment registered (ENABLE_AUTOMATIONS=%s)", settings.ENABLE_AUTOMATIONS)
 
 # Mount versioned API router
 app.include_router(api_router, prefix=settings.API_PREFIX)
