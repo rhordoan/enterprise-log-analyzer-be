@@ -32,6 +32,14 @@ class SentenceTransformerEmbeddingFunction:
     def name(self) -> str:  # pragma: no cover - simple getter
         return f"sentence-transformers::{self.model.get_sentence_embedding_dimension()}"
 
+    # Some Chroma paths call embed_documents/embed_query when available
+    def embed_documents(self, texts: Iterable[str]) -> List[List[float]]:
+        return self(list(texts))
+
+    def embed_query(self, text: str) -> List[float]:
+        result = self([text])
+        return result[0] if result else []
+
 
 def embed_single_text(embedding_function: SentenceTransformerEmbeddingFunction, text: str) -> List[float]:
     return embedding_function([text])[0]
@@ -60,6 +68,14 @@ class OpenAIEmbeddingFunction:
 
     def name(self) -> str:  # pragma: no cover - simple getter
         return f"openai::{self.model}"
+
+    # Chroma compatibility helpers
+    def embed_documents(self, texts: Iterable[str]) -> List[List[float]]:
+        return self(list(texts))
+
+    def embed_query(self, text: str) -> List[float]:
+        result = self([text])
+        return result[0] if result else []
 
 
 class OllamaEmbeddingFunction:
@@ -120,3 +136,11 @@ class OllamaEmbeddingFunction:
 
     def name(self) -> str:  # pragma: no cover - simple getter
         return f"ollama::{self.model}"
+
+    # Chroma compatibility helpers
+    def embed_documents(self, texts: Iterable[str]) -> List[List[float]]:
+        return self(list(texts))
+
+    def embed_query(self, text: str) -> List[float]:
+        result = self([text])
+        return result[0] if result else []
