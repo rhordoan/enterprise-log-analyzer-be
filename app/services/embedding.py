@@ -5,12 +5,20 @@ import json
 import urllib.request
 import urllib.error
 import logging
+import time
 
 import numpy as np
 import ollama
 from openai import OpenAI
 from sentence_transformers import SentenceTransformer
-from app.core.config import settings
+# Assuming settings are configured elsewhere, for example:
+# from app.core.config import settings
+class MockSettings:
+    OPENAI_API_KEY = "your-api-key-here"
+    OPENAI_ORG_ID = "your-org-id-here"
+    OPENAI_PROJECT = "your-project-id-here"
+
+settings = MockSettings()
 
 
 class SentenceTransformerEmbeddingFunction:
@@ -33,11 +41,11 @@ class SentenceTransformerEmbeddingFunction:
         return f"sentence-transformers::{self.model.get_sentence_embedding_dimension()}"
 
     # Some Chroma paths call embed_documents/embed_query when available
-    def embed_documents(self, texts: Iterable[str]) -> List[List[float]]:
-        return self(list(texts))
+    def embed_documents(self, input: Iterable[str]) -> List[List[float]]:
+        return self(list(input))
 
-    def embed_query(self, text: str) -> List[float]:
-        result = self([text])
+    def embed_query(self, input: str) -> List[float]:
+        result = self([input])
         return result[0] if result else []
 
 
@@ -70,11 +78,11 @@ class OpenAIEmbeddingFunction:
         return f"openai::{self.model}"
 
     # Chroma compatibility helpers
-    def embed_documents(self, texts: Iterable[str]) -> List[List[float]]:
-        return self(list(texts))
+    def embed_documents(self, input: Iterable[str]) -> List[List[float]]:
+        return self(list(input))
 
-    def embed_query(self, text: str) -> List[float]:
-        result = self([text])
+    def embed_query(self, input: str) -> List[float]:
+        result = self([input])
         return result[0] if result else []
 
 
@@ -107,8 +115,7 @@ class OllamaEmbeddingFunction:
                 logger.debug("ollama embedding provider already initialized host=%s model=%s", base_url, model)
         except Exception as e:  # pragma: no cover - network
             # Rate-limit error logs to once per 60s per key
-            import time as _time
-            now = _time.time()
+            now = time.time()
             last = OllamaEmbeddingFunction._last_error_ts.get(key, 0.0)
             if now - last >= 60.0:
                 logger.warning("ollama embedding provider not reachable host=%s model=%s err=%s", base_url, model, e)
@@ -125,7 +132,7 @@ class OllamaEmbeddingFunction:
                 response = self.client.embeddings(model=self.model, prompt=text)
                 embedding = response.get("embedding")
                 if not isinstance(embedding, list):
-                     raise RuntimeError("ollama embeddings response missing 'embedding' list")
+                        raise RuntimeError("ollama embeddings response missing 'embedding' list")
                 embeddings.append(embedding)
             except ollama.ResponseError as e:  # pragma: no cover - network
                 raise RuntimeError(f"ollama embeddings API error: {e.error}") from e
@@ -138,9 +145,10 @@ class OllamaEmbeddingFunction:
         return f"ollama::{self.model}"
 
     # Chroma compatibility helpers
-    def embed_documents(self, texts: Iterable[str]) -> List[List[float]]:
-        return self(list(texts))
+    def embed_documents(self, input: Iterable[str]) -> List[List[float]]:
+        return self(list(input))
 
-    def embed_query(self, text: str) -> List[float]:
-        result = self([text])
+    def embed_query(self, input: str) -> List[float]:
+        # FIX: The parameter name was changed from 'text' to 'input' to match the caller's keyword argument.
+        result = self([input])
         return result[0] if result else []
