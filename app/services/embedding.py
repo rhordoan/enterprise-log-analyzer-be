@@ -44,13 +44,19 @@ class SentenceTransformerEmbeddingFunction:
     def embed_documents(self, input: Iterable[str]) -> List[List[float]]:
         return self(list(input))
 
-    def embed_query(self, input: str) -> List[float]:
-        result = self([input])
-        return result[0] if result else []
+    def embed_query(self, input: str) -> List[List[float]]:
+        return self([input])
 
 
-def embed_single_text(embedding_function: SentenceTransformerEmbeddingFunction, text: str) -> List[float]:
-    return embedding_function([text])[0]
+# --- CORRECTED FUNCTION ---
+def embed_single_text(
+    embedding_function: SentenceTransformerEmbeddingFunction, text: str
+) -> List[List[float]]:
+    """
+    Correctly embeds a single text string and returns it in the expected
+    List[List[float]] format for API compatibility.
+    """
+    return embedding_function([text])
 
 
 class OpenAIEmbeddingFunction:
@@ -81,9 +87,8 @@ class OpenAIEmbeddingFunction:
     def embed_documents(self, input: Iterable[str]) -> List[List[float]]:
         return self(list(input))
 
-    def embed_query(self, input: str) -> List[float]:
-        result = self([input])
-        return result[0] if result else []
+    def embed_query(self, input: str) -> List[List[float]]:
+        return self([input])
 
 
 class OllamaEmbeddingFunction:
@@ -159,7 +164,5 @@ class OllamaEmbeddingFunction:
     def embed_documents(self, input: Iterable[str]) -> List[List[float]]:
         return self(list(input))
 
-    def embed_query(self, input: str) -> List[float]:
-        # FIX: The parameter name was changed from 'text' to 'input' to match the caller's keyword argument.
-        result = self([input])
-        return result[0] if result else []
+    def embed_query(self, input: str) -> List[List[float]]:
+        return self([input])
