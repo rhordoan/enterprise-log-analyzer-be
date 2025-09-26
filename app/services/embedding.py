@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, List
+from typing import Iterable, List, Any
 import json
 import urllib.request
 import urllib.error
@@ -128,8 +128,19 @@ class OllamaEmbeddingFunction:
 
         embeddings: List[List[float]] = []
         for text in texts:
+            # Defensively coerce any non-string input (e.g., ['text']) to a string
+            coerced: str
+            if isinstance(text, str):
+                coerced = text
+            elif isinstance(text, (list, tuple)):
+                try:
+                    coerced = " ".join(map(str, text))
+                except Exception:
+                    coerced = str(text)
+            else:
+                coerced = str(text)
             try:
-                response = self.client.embeddings(model=self.model, prompt=text)
+                response = self.client.embeddings(model=self.model, prompt=coerced)
                 embedding = response.get("embedding")
                 if not isinstance(embedding, list):
                         raise RuntimeError("ollama embeddings response missing 'embedding' list")
