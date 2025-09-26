@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Tuple
 import redis.asyncio as aioredis
 
 from app.core.config import get_settings
+from app.services.chroma_service import ChromaClientProvider
+from app.services.online_clustering import assign_or_create_cluster
 from app.parsers.linux import parse_linux_line
 from app.parsers.macos import parse_macos_line
 from app.parsers.templating import render_templated_line
@@ -18,6 +20,15 @@ import threading
 settings = get_settings()
 redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
 LOG = logging.getLogger(__name__)
+
+_provider: ChromaClientProvider | None = None
+
+
+def _get_provider() -> ChromaClientProvider:
+    global _provider
+    if _provider is None:
+        _provider = ChromaClientProvider()
+    return _provider
 
 
 def _os_from_source(source: str | None) -> str:
@@ -138,6 +149,23 @@ async def run_issues_aggregator() -> None:
                     raw = data.get("line") or ""
                     os_name = _os_from_source(source)
                     templated, parsed = _parse_and_template(os_name, raw)
+
+                    # Online assign/create cluster for this templated log
+                    try:
+                        cluster_id = assign_or_create_cluster(os_name, templated)
+                    except Exception:
+                        cluster_id = ""
+
+                    # Attempt to persist cluster_id onto the log doc metadata in logs_<os>
+                    try:
+                        coll_name = f"{settings.CHROMA_LOG_COLLECTION_PREFIX}{os_name}"
+                        collection = _get_provider().get_or_create_collection(coll_name)
+                        current = collection.get(ids=[msg_id], include=["metadatas"]) or {}
+                        metas = (current.get("metadatas") or [[]])[0] or {}
+                        metas["cluster_id"] = cluster_id
+                        collection.update(ids=[msg_id], metadatas=[metas])
+                    except Exception:
+                        pass
                     key = _issue_key(os_name, parsed)
                     issue = _issues.get(key)
                     if issue is None:
@@ -145,6 +173,18 @@ async def run_issues_aggregator() -> None:
                         _issues[key] = issue
                     issue.add_log(raw=raw, templated=templated, parsed=parsed)
                     # We do not ack here; base consumer owns acking, we only observe this stream via separate group
+                    # Track per-cluster size and publish cluster candidate at threshold
+                    try:
+                        if cluster_id:
+                            counter_key = f"cluster:count:{os_name}:{cluster_id}"
+                            new_count = await redis.incr(counter_key)
+                            if new_count == int(settings.CLUSTER_MIN_LOGS_FOR_CLASSIFICATION):
+                                await redis.xadd(settings.CLUSTERS_CANDIDATES_STREAM, {
+                                    "os": os_name,
+                                    "cluster_id": cluster_id,
+                                })
+                    except Exception:
+                        pass
             LOG.debug("aggregated messages=%d open_issues=%d", processed, len(_issues))
         # periodically close idle issues
         to_close: List[str] = []

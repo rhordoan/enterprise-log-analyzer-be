@@ -70,17 +70,33 @@ class OllamaEmbeddingFunction:
     embedding_function interface.
     """
 
+    # Module-level throttling for readiness logs to avoid spamming
+    _logged_ready_keys: set[tuple[str, str]] = set()
+    _last_error_ts: dict[tuple[str, str], float] = {}
+
     def __init__(self, base_url: str, model: str) -> None:
         self.client = ollama.Client(host=base_url)
         self.model = model
-        # One-time readiness probe & concise log (no per-request logging)
         logger = logging.getLogger(__name__)
+        key = (base_url, model)
+        # One-time readiness probe per (base_url, model)
         try:
             info = self.client.list()
-            num_models = len((info or {}).get("models", []))
-            logger.info("ollama embedding provider ready host=%s model=%s models=%d", base_url, model, num_models)
+            if key not in OllamaEmbeddingFunction._logged_ready_keys:
+                num_models = len((info or {}).get("models", []))
+                logger.info("ollama embedding provider ready host=%s model=%s models=%d", base_url, model, num_models)
+                OllamaEmbeddingFunction._logged_ready_keys.add(key)
+            else:
+                # Subsequent initializations are quiet
+                logger.debug("ollama embedding provider already initialized host=%s model=%s", base_url, model)
         except Exception as e:  # pragma: no cover - network
-            logger.info("ollama embedding provider not reachable host=%s model=%s err=%s", base_url, model, e)
+            # Rate-limit error logs to once per 60s per key
+            import time as _time
+            now = _time.time()
+            last = OllamaEmbeddingFunction._last_error_ts.get(key, 0.0)
+            if now - last >= 60.0:
+                logger.warning("ollama embedding provider not reachable host=%s model=%s err=%s", base_url, model, e)
+                OllamaEmbeddingFunction._last_error_ts[key] = now
 
     def __call__(self, input: Iterable[str]) -> List[List[float]]:
         texts = list(input)

@@ -117,7 +117,7 @@ async def consume_logs():
                     kind = (source or "").split(":", 1)[0]
 
                     # Normalize metrics for supported kinds and optionally export to OTel
-                    if settings.ENABLE_METRICS_NORMALIZATION and kind in {"snmp", "dcim_http"}:
+                    if settings.ENABLE_METRICS_NORMALIZATION and kind in {"snmp", "dcim_http", "telegraf"}:
                         payload_obj = None
                         try:
                             import json as _json

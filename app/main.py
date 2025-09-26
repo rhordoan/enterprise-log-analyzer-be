@@ -14,6 +14,7 @@ from app.services.prototype_improver import attach_prototype_improver
 from app.services.llm_service import llm_healthcheck
 from app.streams.producer_manager import attach_producers
 from app.streams.automations import attach_automations
+from app.streams.cluster_enricher import attach_cluster_enricher
 import logging
 
 LOG = logging.getLogger(__name__)
@@ -90,6 +91,9 @@ LOG.info("modular producers attachment registered")
 if settings.ENABLE_ENRICHER:
     attach_enricher(app)
     LOG.info("enricher attachment registered (ENABLE_ENRICHER=%s)", settings.ENABLE_ENRICHER)
+
+# Optionally start the cluster enricher when ENABLE_CLUSTER_ENRICHER is true
+attach_cluster_enricher(app)
 
 attach_prototype_improver(app)
 

@@ -5,7 +5,7 @@ from typing import Any, Dict, Literal
 from pydantic import BaseModel, Field
 
 
-SourceType = Literal["filetail", "splunk", "datadog", "thousandeyes", "snmp", "dcim_http"]
+SourceType = Literal["filetail", "splunk", "datadog", "thousandeyes", "snmp", "dcim_http", "telegraf"]
 
 
 class DataSourceBase(BaseModel):
@@ -27,6 +27,9 @@ class DataSourceUpdate(BaseModel):
 
 class DataSourceOut(DataSourceBase):
     id: int
+    # Returned only on creation for telegraf sources
+    one_time_token: str | None = None
+    one_time_agent_id: str | None = None
 
     class Config:
         orm_mode = True

@@ -199,6 +199,45 @@ Only JSON; no extra text.
         return _chat_json_with_openai(SYSTEM, prompt)
 
 
+def classify_cluster(os_name: str, cluster_id: str, medoid_doc: str, neighbors: List[Dict[str, Any]], retrieved_logs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """LLM-based classification for a cluster (prototype) with cluster-scoped context."""
+    examples = "\n".join([f"- {n.get('document','')}" for n in neighbors[:8]])
+    recent = "\n".join([f"- {l.get('templated','')}" for l in retrieved_logs[:50]])
+    failure_types = "|".join([
+        "disk", "storage", "raid", "nvme", "filesystem", "io",
+        "cpu", "memory", "network", "power", "thermal", "wifi",
+        "windows_update", "service_failure", "sandbox",
+        "application", "configuration", "security", "dependency",
+        "kernel", "driver", "os_update", "unknown"
+    ])
+    prompt = f"""
+OS: {os_name}
+Cluster: {cluster_id}
+Cluster medoid (templated):
+{medoid_doc}
+
+Logs in this cluster (templated):
+{recent}
+
+Similar templates/logs:
+{examples}
+
+Return JSON with {{
+  "is_hardware_failure": true|false,
+  "failure_type": "{failure_types}",
+  "confidence": 0..1,
+  "top_signals": ["..."],
+  "summary": "...",
+  "recommendation": "Actionable remediation."
+}}
+Only JSON; no extra text.
+"""
+    if settings.LLM_PROVIDER == "ollama":
+        return _chat_json_with_ollama(SYSTEM, prompt, temperature=0.2)
+    else:
+        return _chat_json_with_openai(SYSTEM, prompt)
+
+
 def llm_healthcheck() -> Dict[str, Any]:
     """Attempt a minimal LLM call to verify availability; logs success/failure.
 

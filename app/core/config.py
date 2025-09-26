@@ -71,11 +71,16 @@ class Settings(BaseSettings):
 
     # Issue grouping streams
     ISSUES_CANDIDATES_STREAM: str = "issues_candidates"
+    # Cluster-level stream
+    CLUSTERS_CANDIDATES_STREAM: str = "clusters_candidates"
 
     # Routing / clustering params
     NEAREST_PROTO_THRESHOLD: float = 0.25  # cosine distance threshold
     CLUSTER_MIN_SIZE: int = 5
     CLUSTER_DISTANCE_THRESHOLD: float = 0.2  # max cosine distance intra-cluster
+    # Online clustering + cluster classification thresholds
+    ONLINE_CLUSTER_DISTANCE_THRESHOLD: float = 0.25
+    CLUSTER_MIN_LOGS_FOR_CLASSIFICATION: int = 20
 
     # Issue aggregation params
     ISSUE_INACTIVITY_SEC: int = 120  # close issue after N seconds without new logs
@@ -87,6 +92,7 @@ class Settings(BaseSettings):
     ENABLE_ENRICHER: bool = False
     ENABLE_AUTOMATIONS: bool = False
     AUTOMATIONS_DRY_RUN: bool = True
+    ENABLE_CLUSTER_ENRICHER: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
