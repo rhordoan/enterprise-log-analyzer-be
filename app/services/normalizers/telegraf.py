@@ -64,3 +64,4 @@ def normalize_telegraf(_: str, payload: Dict[str, Any], cfg: Dict[str, Any]) -> 
     return out
 
 
+
