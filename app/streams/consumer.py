@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from collections import defaultdict
-from contextlib import suppress
 from typing import Any, Dict, List
 
 import redis.asyncio as aioredis
@@ -17,6 +16,10 @@ from app.parsers.linux import parse_linux_line
 from app.parsers.macos import parse_macos_line
 from app.parsers.templating import render_templated_line
 from app.services.metrics_normalization import normalize
+# Ensure normalizers are registered at import time
+from app.services.normalizers import telegraf as _telegraf_norm  # noqa: F401
+from app.services.normalizers import dcim_http as _dcim_http_norm  # noqa: F401
+from app.services.normalizers import snmp as _snmp_norm  # noqa: F401
 from app.services.otel_exporter import export_metrics
 from app.db.session import AsyncSessionLocal
 from app.models.data_source import DataSource

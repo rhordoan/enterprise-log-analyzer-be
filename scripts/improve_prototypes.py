@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from typing import Any, Dict, List
 
 import redis.asyncio as aioredis
 

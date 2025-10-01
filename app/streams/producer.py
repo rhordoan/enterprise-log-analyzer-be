@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 
 import aiofiles
-from contextlib import suppress
 from fastapi import FastAPI
 import redis.asyncio as aioredis
 from redis.exceptions import ConnectionError as RedisConnectionError

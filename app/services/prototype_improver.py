@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from contextlib import suppress
 import threading
 
 from fastapi import FastAPI

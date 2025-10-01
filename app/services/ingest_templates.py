@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Tuple
 
 from app.services.chroma_service import ChromaClientProvider, collection_name_for_os
 

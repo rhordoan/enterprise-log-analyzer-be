@@ -6,7 +6,6 @@ import threading
 from contextlib import suppress
 
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.session import AsyncSessionLocal
@@ -96,7 +95,12 @@ class ProducerManager:
             self.ensure_loop()
         if source_id in self.tasks:
             return
-        factory = get_factory(type_)
+        # Resolve factory; skip unknown types gracefully (e.g., HTTP-ingested kinds like 'telegraf')
+        try:
+            factory = get_factory(type_)
+        except KeyError:
+            LOG.info("skip starting unknown producer type=%s id=%s (no plugin registered)", type_, source_id)
+            return
         cfg = dict(config)
         # Pass source_id to the plugin for downstream enrichment
         cfg["_source_id"] = source_id
@@ -130,6 +134,10 @@ class ProducerManager:
         # start new
         for r in rows:
             if r.id not in self.tasks:
+                # Skip non-plugin types that are ingested via HTTP endpoints
+                if r.type in {"telegraf"}:
+                    LOG.info("not starting producer for type=%s id=%s (handled via ingestion)", r.type, r.id)
+                    continue
                 self.start(r.id, r.type, r.config)
 
 

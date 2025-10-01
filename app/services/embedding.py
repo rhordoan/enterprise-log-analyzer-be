@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Any
-import json
-import urllib.request
-import urllib.error
+from typing import Iterable, List
 import logging
 import time
 

@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
 
 from app.core.config import settings
 from app.core.logging_config import configure_logging, install_request_logging
@@ -8,7 +7,6 @@ from app.api.v1.api import api_router
 from app.streams.consumer import attach_consumer
 from app.streams.issues_aggregator import attach_issues_aggregator
 from app.db.init_db import init_db
-from app.streams.producer import attach_producer
 from app.streams.enricher import attach_enricher
 from app.services.prototype_improver import attach_prototype_improver
 from app.services.llm_service import llm_healthcheck

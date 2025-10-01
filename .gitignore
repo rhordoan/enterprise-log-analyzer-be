@@ -68,5 +68,4 @@ venv.bak/
 # Alembic versions cache
 alembic/versions/*.pyc
 
-.chroma
 /.chroma

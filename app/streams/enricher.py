@@ -1,16 +1,14 @@
 import asyncio
 import json
 import logging
-from contextlib import suppress
 from typing import Any, Dict, List
 
 import redis.asyncio as aioredis
 
 from fastapi import FastAPI
 from app.core.config import get_settings
-from app.services.llm_service import classify_failure, generate_hypothesis, classify_issue
+from app.services.llm_service import generate_hypothesis, classify_issue
 from app.services.chroma_service import ChromaClientProvider, collection_name_for_os
-from app.core.config import settings as global_settings
 import threading
 
 

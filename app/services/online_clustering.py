@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
 import uuid
 
 from app.services.prototype_router import nearest_prototype
@@ -66,6 +65,9 @@ def assign_or_create_cluster(os_name: str, templated: str, *, threshold: float |
         # Best-effort; if storage fails we still return the id for downstream tagging
         pass
     return cid
+
+
+
 
 
 
