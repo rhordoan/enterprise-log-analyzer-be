@@ -20,6 +20,7 @@ from app.services.metrics_normalization import normalize
 from app.services.normalizers import telegraf as _telegraf_norm  # noqa: F401
 from app.services.normalizers import dcim_http as _dcim_http_norm  # noqa: F401
 from app.services.normalizers import snmp as _snmp_norm  # noqa: F401
+from app.services.normalizers import redfish as _redfish_norm  # noqa: F401
 from app.services.otel_exporter import export_metrics
 from app.db.session import AsyncSessionLocal
 from app.models.data_source import DataSource
@@ -120,7 +121,7 @@ async def consume_logs():
                     kind = (source or "").split(":", 1)[0]
 
                     # Normalize metrics for supported kinds and optionally export to OTel
-                    if settings.ENABLE_METRICS_NORMALIZATION and kind in {"snmp", "dcim_http", "telegraf"}:
+                    if settings.ENABLE_METRICS_NORMALIZATION and kind in {"snmp", "dcim_http", "telegraf", "redfish"}:
                         payload_obj = None
                         try:
                             import json as _json
@@ -142,6 +143,10 @@ async def consume_logs():
                                 cfg = {}
                             points = normalize(kind, payload_obj, cfg or {})
                             if points:
+                                try:
+                                    LOG.info("consumer: normalized metrics kind=%s points=%d", kind, len(points))
+                                except Exception:
+                                    pass
                                 # Export to OTEL if enabled
                                 export_metrics(points)
                                 # Also write to Redis metrics stream for internal uses
@@ -164,14 +169,19 @@ async def consume_logs():
                     os_name = _os_from_source(source)
                     templated, parsed = _parse_and_template(os_name, line)
 
+                    # Choose document text based on embedding mode
+                    use_raw = settings.EMBEDDING_PROVIDER.lower() == "logbert" and getattr(settings, "LOGBERT_USE_RAW_LOGS", False)
+                    doc_text = line if use_raw else templated
+
                     # route to logs_<os>
                     coll_name = _log_collection_name(os_name)
                     batched[coll_name]["ids"].append(msg_id)
-                    batched[coll_name]["documents"].append(templated)
+                    batched[coll_name]["documents"].append(doc_text)
                     batched[coll_name]["metadatas"].append({
                         "os": os_name,
                         "source": source or "",
                         "raw": line,
+                        "embedding_mode": "raw" if use_raw else "templated",
                         **parsed,
                     })
 
@@ -182,7 +192,8 @@ async def consume_logs():
                     distance = None
                     label = None
                     try:
-                        nearest = nearest_prototype(os_name, templated, k=1)
+                        query_text = doc_text  # align with what's stored and embedded
+                        nearest = nearest_prototype(os_name, query_text, k=1)
                         distance = nearest[0]["distance"] if nearest else None
                         label = (nearest[0]["metadata"] or {}).get("label") if nearest else None
                     except Exception as exc:
@@ -217,8 +228,8 @@ async def consume_logs():
                 if payload["ids"]:
                     collection.upsert(ids=payload["ids"], documents=payload["documents"], metadatas=payload["metadatas"])
                     LOG.info("upserted collection=%s count=%d", coll_name, len(payload["ids"]))
-            except Exception as exc:
-                LOG.info("upsert failed collection=%s err=%s", coll_name, exc)
+            except Exception:
+                LOG.exception("upsert failed collection=%s", coll_name)
 
         # Publish per-line candidates if enabled
         if settings.ENABLE_PER_LINE_CANDIDATES:

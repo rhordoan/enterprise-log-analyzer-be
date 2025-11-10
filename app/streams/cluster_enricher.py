@@ -122,6 +122,25 @@ async def run_cluster_enricher() -> None:
                             })
 
                     result = classify_cluster(os_name, cluster_id, medoid_doc, neighbors, retrieved)
+                    
+                    # Record LLM metrics if enabled
+                    if settings.ENABLE_CLUSTER_METRICS:
+                        try:
+                            from app.services.cluster_metrics import ClusterMetricsTracker
+                            metadata = result.get("_llm_metadata", {})
+                            tracker = ClusterMetricsTracker(redis)
+                            await tracker.record_llm_call(
+                                os_name=os_name,
+                                cluster_id=cluster_id,
+                                operation="classify_cluster",
+                                confidence=result.get("confidence"),
+                                tokens_used=metadata.get("tokens", 0),
+                                latency_ms=metadata.get("latency_ms", 0),
+                                success=metadata.get("success", True),
+                            )
+                        except Exception:
+                            pass  # Don't fail enrichment if metrics fail
+                    
                     payload = {
                         "type": "cluster",
                         "os": os_name,

@@ -148,9 +148,9 @@ async def run_issues_aggregator() -> None:
                     os_name = _os_from_source(source)
                     templated, parsed = _parse_and_template(os_name, raw)
 
-                    # Online assign/create cluster for this templated log
+                    # Online assign/create cluster for this log (pass raw for semantic clustering)
                     try:
-                        cluster_id = assign_or_create_cluster(os_name, templated)
+                        cluster_id = assign_or_create_cluster(os_name, templated, raw_log=raw)
                     except Exception:
                         cluster_id = ""
 

@@ -40,6 +40,13 @@ def configure_logging() -> None:
     - UVICORN_ACCESS_LOG (default true)
     """
 
+    # Prefer app settings (which load from .env) and fall back to environment
+    try:
+        from app.core.config import settings as _settings  # lazy import to avoid cycles
+        log_level = str(getattr(_settings, "LOG_LEVEL", os.getenv("LOG_LEVEL", "INFO"))).upper()
+        sqlalchemy_level = str(getattr(_settings, "SQLALCHEMY_LOG_LEVEL", os.getenv("SQLALCHEMY_LOG_LEVEL", "WARNING"))).upper()
+        uvicorn_access = bool(getattr(_settings, "UVICORN_ACCESS_LOG", os.getenv("UVICORN_ACCESS_LOG", "false").lower() not in {"0", "false", "no"}))
+    except Exception:
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     sqlalchemy_level = os.getenv("SQLALCHEMY_LOG_LEVEL", "WARNING").upper()
     uvicorn_access = os.getenv("UVICORN_ACCESS_LOG", "false").lower() not in {"0", "false", "no"}
@@ -79,12 +86,29 @@ def configure_logging() -> None:
     logging.config.dictConfig(dict_config)
 
 
+_request_logging_enabled: bool | None = None
+
+
+def get_request_logs_status() -> dict[str, object]:
+    enabled = _request_logging_enabled if _request_logging_enabled is not None else True
+    return {"enabled": bool(enabled)}
+
+
+def set_request_logs_enabled(value: bool) -> dict[str, object]:
+    global _request_logging_enabled
+    _request_logging_enabled = bool(value)
+    return get_request_logs_status()
+
+
 def install_request_logging(app: FastAPI) -> None:
     """Add request/response logging middleware and exception handler."""
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):  # type: ignore[override]
         logger = logging.getLogger("http")
+        # Runtime toggle: skip all request logs when disabled
+        if (_request_logging_enabled is not None) and (not _request_logging_enabled):
+            return await call_next(request)
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
         start = time.perf_counter()
         logger.info("HTTP %s %s start", request.method, request.url.path, extra={"request_id": request_id})

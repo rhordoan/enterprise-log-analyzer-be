@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+import logging
 from typing import Tuple
 
 from app.services.chroma_service import ChromaClientProvider, collection_name_for_os
+
+LOG = logging.getLogger(__name__)
 
 
 def read_templates(csv_path: Path) -> Tuple[list[str], list[str]]:
@@ -32,7 +35,11 @@ def ingest_csv_to_collection(os_name: str, csv_path: Path, provider: ChromaClien
 
     # Upsert templates with metadata
     metadatas = [{"os": os_name, "source": str(csv_path), "event_id": ids[i]} for i in range(len(ids))]
-    collection.upsert(ids=ids, documents=texts, metadatas=metadatas)
+    try:
+        collection.upsert(ids=ids, documents=texts, metadatas=metadatas)
+    except Exception:
+        LOG.exception("ingest_templates upsert failed os=%s collection=%s", os_name, collection_name)
+        raise
     return len(texts)
 
 

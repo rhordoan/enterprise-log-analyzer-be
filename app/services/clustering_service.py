@@ -4,10 +4,15 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 import math
+import logging
+import asyncio
 
 from app.core.config import settings
+from app.core.runtime_state import is_shutting_down
 from app.services.chroma_service import ChromaClientProvider
 from app.services.failure_rules import match_failure_signals
+
+LOG = logging.getLogger(__name__)
 
 
 def _suffix_for_os(os_name: str) -> str:
@@ -184,7 +189,19 @@ def upsert_prototypes(os_name: str, provider: ChromaClientProvider, prototypes: 
         for p in prototypes
     ]
     embeddings = [p.centroid for p in prototypes]
-    collection.upsert(ids=ids, documents=docs, embeddings=embeddings, metadatas=metas)
+    try:
+        collection.upsert(ids=ids, documents=docs, embeddings=embeddings, metadatas=metas)
+    except Exception:
+        # Print full stack with brief context to aid debugging
+        dim = len(embeddings[0]) if embeddings and embeddings[0] else 0
+        LOG.exception(
+            "upsert_prototypes failed os=%s collection=%s count=%d dim=%d",
+            os_name,
+            coll_name,
+            len(ids),
+            dim,
+        )
+        raise
     return len(prototypes)
 
 
@@ -225,6 +242,26 @@ def cluster_os(
     clusters, centroids = _single_pass_cluster(embs, threshold=threshold, min_size=min_size)
     prototypes = build_prototypes(ids, docs, embs, clusters, centroids)
     count = upsert_prototypes(os_name, provider, prototypes)
+    
+    # Record clustering metrics if enabled
+    if settings.ENABLE_CLUSTER_METRICS and clusters and embs and not is_shutting_down:
+        try:
+            import redis.asyncio as aioredis
+            from app.services.cluster_metrics import ClusterMetricsTracker
+            
+            async def _record_metrics():
+                redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                tracker = ClusterMetricsTracker(redis_client)
+                await tracker.record_batch_clustering_metrics(os_name, clusters, embs, threshold, min_size)
+                await redis_client.close()
+            
+            # Offload to a daemon thread running its own event loop to avoid
+            # both "no running event loop" and pending task destruction on shutdown.
+            import threading
+            threading.Thread(target=lambda: asyncio.run(_record_metrics()), daemon=True).start()
+        except Exception:
+            pass  # Don't fail clustering if metrics fail
+    
     return {"os": os_name, "clusters": len(clusters), "prototypes": count}
 
 

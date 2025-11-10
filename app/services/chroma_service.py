@@ -12,6 +12,7 @@ from app.services.embedding import (
     SentenceTransformerEmbeddingFunction,
     OpenAIEmbeddingFunction,
     OllamaEmbeddingFunction,
+    LogBERTEmbeddingFunction,
 )
 
 
@@ -35,10 +36,15 @@ class ChromaClientProvider:
                 base_url=settings.OLLAMA_BASE_URL,
                 model=settings.OLLAMA_EMBEDDING_MODEL,
             )
+        elif provider == "logbert":
+            self.embedding_fn = LogBERTEmbeddingFunction(
+                model_name=settings.LOGBERT_MODEL_NAME,
+                device=settings.LOGBERT_DEVICE,
+            )
         else:
             raise ValueError(
                 f"Unknown EMBEDDING_PROVIDER '{settings.EMBEDDING_PROVIDER}'. "
-                "Supported: openai, sentence-transformers, ollama"
+                "Supported: openai, sentence-transformers, ollama, logbert"
             )
         self._client = self._create_client()
 

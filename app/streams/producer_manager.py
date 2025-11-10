@@ -19,6 +19,8 @@ from app.streams.producers import datadog as _datadog  # noqa: F401
 from app.streams.producers import thousandeyes as _thousandeyes  # noqa: F401
 from app.streams.producers import snmp as _snmp  # noqa: F401
 from app.streams.producers import http_poller as _dcim_http  # noqa: F401
+from app.streams.producers import redfish as _redfish  # noqa: F401
+from app.streams.producers import dell_ome as _dell_ome  # noqa: F401
 
 
 LOG = logging.getLogger(__name__)

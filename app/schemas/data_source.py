@@ -5,7 +5,7 @@ from typing import Any, Dict, Literal
 from pydantic import BaseModel, Field
 
 
-SourceType = Literal["filetail", "splunk", "datadog", "thousandeyes", "snmp", "dcim_http", "telegraf"]
+SourceType = Literal["filetail", "splunk", "datadog", "thousandeyes", "snmp", "dcim_http", "telegraf", "redfish", "dell_ome"]
 
 
 class DataSourceBase(BaseModel):

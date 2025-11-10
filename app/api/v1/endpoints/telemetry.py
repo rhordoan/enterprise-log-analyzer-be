@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.services.otel_exporter import get_export_status, set_export_enabled
 from app.services.normalizers.dcim_http import get_redfish_status, set_redfish_enabled
+from app.core.logging_config import get_request_logs_status, set_request_logs_enabled
 from app.core.config import get_settings
 from app.streams.automations import get_status as get_auto_status, set_dry_run as set_auto_dryrun
 from app.rules.automations import get_rules as rules_get, upsert_rule as rules_upsert, delete_rule as rules_delete
@@ -43,6 +44,16 @@ async def redfish_status() -> dict[str, object]:
 @router.post("/redfish/status")
 async def redfish_toggle(body: ExportToggle) -> dict[str, object]:
     return set_redfish_enabled(body.enabled)
+
+
+@router.get("/request-logs/status")
+async def request_logs_status() -> dict[str, object]:
+    return get_request_logs_status()
+
+
+@router.post("/request-logs/status")
+async def request_logs_toggle(body: ExportToggle) -> dict[str, object]:
+    return set_request_logs_enabled(body.enabled)
 
 
 @router.get("/metrics")
