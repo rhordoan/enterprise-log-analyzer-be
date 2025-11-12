@@ -5,6 +5,7 @@ from typing import Optional
 import chromadb
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
+from pathlib import Path
 
 from app.core.config import settings
 import re
@@ -55,7 +56,15 @@ class ChromaClientProvider:
                 port=settings.CHROMA_SERVER_PORT,
             )
         # default to local persistent client
-        return chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIRECTORY)
+        # Resolve to an absolute path to avoid losing data when cwd changes across restarts
+        try:
+            persist_path = str(Path(settings.CHROMA_PERSIST_DIRECTORY).resolve())
+            # Ensure directory exists
+            Path(persist_path).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            # Fall back to the raw setting if resolution fails for any reason
+            persist_path = settings.CHROMA_PERSIST_DIRECTORY
+        return chromadb.PersistentClient(path=persist_path)
 
     @property
     def client(self) -> ClientAPI:

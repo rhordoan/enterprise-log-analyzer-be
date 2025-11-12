@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 import logging
 from pathlib import Path
 import re
+import math
 
 from app.services.chroma_service import ChromaClientProvider
 from app.core.config import settings
@@ -75,7 +76,7 @@ def nearest_prototype(os_name: str, templated_text: str, k: int = 3) -> List[Dic
     except Exception:
         count_val = "unknown"
 
-    LOG.info(
+    LOG.debug(
         "prototype_router: using proto collection name=%s count=%s provider=%s chroma_mode=%s chroma=%s",
         final_name,
         count_val,
@@ -92,12 +93,43 @@ def nearest_prototype(os_name: str, templated_text: str, k: int = 3) -> List[Dic
     dists = (result.get("distances") or [[]])[0]
     metas = (result.get("metadatas") or [[]])[0]
     for i in range(len(ids)):
+        # Sanitize distances: treat non-finite values as missing
+        dist_val = dists[i] if i < len(dists) else None
+        if not isinstance(dist_val, (int, float)) or not math.isfinite(dist_val):
+            dist_val = None
         out.append({
             "id": ids[i],
             "document": docs[i] if i < len(docs) else "",
-            "distance": dists[i] if i < len(dists) else None,
+            "distance": dist_val,
             "metadata": metas[i] if i < len(metas) else {},
         })
+    # If we didn't get any valid distances, fall back to explicit embedding query
+    if out and not any(isinstance(item.get("distance"), (int, float)) for item in out):
+        try:
+            # Embed the query explicitly to avoid back-end issues returning NaN
+            query_emb = provider.embedding_fn.embed_query(templated_text)
+            result2 = collection.query(query_embeddings=query_emb, n_results=max(1, k), include=["distances", "metadatas", "documents"])
+            out2: List[Dict[str, Any]] = []
+            ids2 = (result2.get("ids") or [[]])[0]
+            docs2 = (result2.get("documents") or [[]])[0]
+            dists2 = (result2.get("distances") or [[]])[0]
+            metas2 = (result2.get("metadatas") or [[]])[0]
+            for i in range(len(ids2)):
+                dist_val2 = dists2[i] if i < len(dists2) else None
+                if not isinstance(dist_val2, (int, float)) or not math.isfinite(dist_val2):
+                    dist_val2 = None
+                out2.append({
+                    "id": ids2[i],
+                    "document": docs2[i] if i < len(docs2) else "",
+                    "distance": dist_val2,
+                    "metadata": metas2[i] if i < len(metas2) else {},
+                })
+            # Only return fallback if it provided results
+            if out2:
+                return out2
+        except Exception:
+            # Keep original output if fallback fails
+            pass
     return out
 
 

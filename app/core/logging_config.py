@@ -47,9 +47,9 @@ def configure_logging() -> None:
         sqlalchemy_level = str(getattr(_settings, "SQLALCHEMY_LOG_LEVEL", os.getenv("SQLALCHEMY_LOG_LEVEL", "WARNING"))).upper()
         uvicorn_access = bool(getattr(_settings, "UVICORN_ACCESS_LOG", os.getenv("UVICORN_ACCESS_LOG", "false").lower() not in {"0", "false", "no"}))
     except Exception:
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    sqlalchemy_level = os.getenv("SQLALCHEMY_LOG_LEVEL", "WARNING").upper()
-    uvicorn_access = os.getenv("UVICORN_ACCESS_LOG", "false").lower() not in {"0", "false", "no"}
+        log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        sqlalchemy_level = os.getenv("SQLALCHEMY_LOG_LEVEL", "WARNING").upper()
+        uvicorn_access = os.getenv("UVICORN_ACCESS_LOG", "false").lower() not in {"0", "false", "no"}
 
     handler: Dict[str, Any] = {
         "class": "logging.StreamHandler",

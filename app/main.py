@@ -105,6 +105,33 @@ async def _log_llm_configuration():
         threading.Thread(target=_run_hc, name="llm-healthcheck", daemon=True).start()
     except Exception:
         pass
+    # Log Chroma collection availability for templates and prototypes
+    try:
+        from app.services.chroma_service import ChromaClientProvider, collection_name_for_os
+        provider = ChromaClientProvider()
+        def _safe_count(coll):
+            try:
+                try:
+                    c = coll.count()  # type: ignore[attr-defined]
+                    return int(c) if isinstance(c, int) else -1
+                except Exception:
+                    peek = coll.get(limit=1) or {}
+                    ids0 = peek.get("ids") or []
+                    return 0 if not ids0 else -1
+            except Exception:
+                return -1
+        for os_name in ("linux", "macos", "windows"):
+            t_name = collection_name_for_os(os_name)
+            t_coll = provider.get_or_create_collection(t_name)
+            t_count = _safe_count(t_coll)
+            # proto collection
+            suffix = os_name
+            p_name = f"{getattr(settings, 'CHROMA_PROTO_COLLECTION_PREFIX', 'proto_')}{suffix}"
+            p_coll = provider.get_or_create_collection(p_name)
+            p_count = _safe_count(p_coll)
+            LOG.info("Chroma collections os=%s templates=%s prototypes=%s", os_name, t_count, p_count)
+    except Exception:
+        pass
 
 attach_consumer(app)
 LOG.info("consumer attachment registered")
