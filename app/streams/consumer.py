@@ -121,7 +121,7 @@ async def consume_logs():
                     kind = (source or "").split(":", 1)[0]
 
                     # Normalize metrics for supported kinds and optionally export to OTel
-                    if settings.ENABLE_METRICS_NORMALIZATION and kind in {"snmp", "dcim_http", "telegraf", "redfish"}:
+                    if settings.ENABLE_METRICS_NORMALIZATION and kind in {"snmp", "dcim_http", "telegraf", "redfish", "scom", "squaredup", "catalyst", "thousandeyes", "bluecat"}:
                         payload_obj = None
                         try:
                             import json as _json
@@ -141,12 +141,21 @@ async def consume_logs():
                                         cfg = row.config
                             except Exception:
                                 cfg = {}
-                            points = normalize(kind, payload_obj, cfg or {})
+                            try:
+                                points = normalize(kind, payload_obj, cfg or {})
+                            except Exception as ne:
+                                logging.getLogger("app.kaboom").info(
+                                    "normalize_failed kind=%s src_id=%s err=%s line_len=%s",
+                                    kind, data.get("source_id"), ne, len(line or ""),
+                                )
+                                points = []
                             if points:
                                 try:
                                     LOG.info("consumer: normalized metrics kind=%s points=%d", kind, len(points))
-                                except Exception:
-                                    pass
+                                except Exception as e_xadd:
+                                    logging.getLogger("app.kaboom").info(
+                                        "metrics_xadd_failed kind=%s err=%s name=%s", kind, e_xadd, mp.get("name")
+                                    )
                                 # Export to OTEL if enabled
                                 export_metrics(points)
                                 # Also write to Redis metrics stream for internal uses
@@ -163,10 +172,247 @@ async def consume_logs():
                                         })
                                     except Exception:
                                         pass
-                                # Metrics processed; ack and skip log path
-                                ack_ids.append(msg_id)
-                                continue
+                                # Derive incident candidates from normalized telemetry (network-aware)
+                                try:
+                                    norm_candidates: List[Dict[str, Any]] = []
+                                    # ThousandEyes candidates
+                                    if kind == "thousandeyes":
+                                        typ = str(payload_obj.get("type") or "")
+                                        if typ == "alert":
+                                            sev = str(payload_obj.get("severity") or payload_obj.get("level") or "").lower()
+                                            if sev in {"warning", "major", "critical"}:
+                                                norm_candidates.append({
+                                                    "os": "network",
+                                                    "raw": line,
+                                                    "templated": f"thousandeyes alert {sev} {payload_obj.get('ruleName','')}",
+                                                    "rule_label": "network_alert",
+                                                    "rule_score": 1.0,
+                                                    "nearest_distance": "",
+                                                    "nearest_label": "",
+                                                })
+                                        elif typ == "test":
+                                            metrics = payload_obj.get("metrics") or {}
+                                            # Support both 'latencyMs' and 'avgLatency' forms
+                                            lat = metrics.get("latencyMs", payload_obj.get("avgLatency"))
+                                            loss = metrics.get("loss")
+                                            if (isinstance(lat, (int, float)) and lat > 150) or (isinstance(loss, (int, float)) and loss > 1.0):
+                                                norm_candidates.append({
+                                                    "os": "network",
+                                                    "raw": line,
+                                                    "templated": f"thousandeyes test latency={lat}ms loss={loss}%",
+                                                    "rule_label": "network_performance",
+                                                    "rule_score": 0.9,
+                                                    "nearest_distance": "",
+                                                    "nearest_label": "",
+                                                })
+                                    # Catalyst candidates
+                                    if kind == "catalyst":
+                                        typ = str(payload_obj.get("type") or "")
+                                        if typ == "event":
+                                            sev = str(payload_obj.get("severity") or "").lower()
+                                            if sev in {"major", "critical"}:
+                                                norm_candidates.append({
+                                                    "os": "network",
+                                                    "raw": line,
+                                                    "templated": f"catalyst event {sev} {payload_obj.get('name','')}",
+                                                    "rule_label": "network_event",
+                                                    "rule_score": 1.0,
+                                                    "nearest_distance": "",
+                                                    "nearest_label": "",
+                                                })
+                                    # SCOM candidates
+                                    if kind == "scom":
+                                        typ = str(payload_obj.get("type") or "")
+                                        if typ == "alert":
+                                            sev = str(payload_obj.get("Severity") or payload_obj.get("severity") or "").lower()
+                                            name = str(payload_obj.get("Name") or payload_obj.get("name") or "")
+                                            src = str(payload_obj.get("MonitoringObjectDisplayName") or "")
+                                            if sev in {"warning", "error", "critical"} or name:
+                                                norm_candidates.append({
+                                                    "os": "windows",
+                                                    "raw": line,
+                                                    "templated": f"scom alert {sev} {name} source={src}".strip(),
+                                                    "rule_label": "windows_alert",
+                                                    "rule_score": 1.0,
+                                                    "nearest_distance": "",
+                                                    "nearest_label": "",
+                                                })
+                                        elif typ in {"performance", "event"}:
+                                            # Defer to generic fallback below
+                                            pass
+                                    # SquaredUp candidates
+                                    if kind == "squaredup":
+                                        typ = str(payload_obj.get("type") or "")
+                                        if typ == "alert":
+                                            sev = str(payload_obj.get("severity") or "").lower()
+                                            title = str(payload_obj.get("title") or "")
+                                            if sev in {"warning", "error", "critical"} or title:
+                                                norm_candidates.append({
+                                                    "os": "windows",
+                                                    "raw": line,
+                                                    "templated": f"squaredup alert {sev} {title}".strip(),
+                                                    "rule_label": "windows_alert",
+                                                    "rule_score": 1.0,
+                                                    "nearest_distance": "",
+                                                    "nearest_label": "",
+                                                })
+                                        elif typ == "health":
+                                            state = str(payload_obj.get("state") or payload_obj.get("status") or "").lower()
+                                            name = str(payload_obj.get("name") or "")
+                                            if state and state not in {"ok", "healthy", "green"}:
+                                                norm_candidates.append({
+                                                    "os": "windows",
+                                                    "raw": line,
+                                                    "templated": f"squaredup health {state} {name}".strip(),
+                                                    "rule_label": "windows_health",
+                                                    "rule_score": 0.9,
+                                                    "nearest_distance": "",
+                                                    "nearest_label": "",
+                                                })
+                                except Exception as e_pub:
+                                    logging.getLogger("app.kaboom").info(
+                                        "norm_candidate_publish_failed kind=%s err=%s summary_len=%s",
+                                        kind, e_pub, len((c.get("templated") or c.get("raw") or "")),
+                                    )
+                                # Publish any generated candidates immediately to issues stream
+                                try:
+                                    import json as _json
+                                    for c in norm_candidates:
+                                        # Publish in incidents-friendly shape so UI can render immediately
+                                        logs_field = _json.dumps([{
+                                            "templated": c.get("templated", ""),
+                                            "raw": c.get("raw", ""),
+                                        }])
+                                        _eid = await redis.xadd(settings.ISSUES_CANDIDATES_STREAM, {
+                                            "os": c.get("os", "unknown"),
+                                            "issue_key": c.get("issue_key", ""),
+                                            "templated_summary": c.get("templated", "") or c.get("raw", ""),
+                                            "logs": logs_field,
+                                        })
+                                        try:
+                                            logging.getLogger("app.kaboom").info(
+                                                "norm_incident_published id=%s kind=%s os=%s", _eid, kind, c.get("os")
+                                            )
+                                        except Exception:
+                                            pass
+                                    # Fallback: if no specific candidates matched, publish a generic incident
+                                    if not norm_candidates and kind in {"thousandeyes", "catalyst", "snmp", "dcim_http", "telegraf", "bluecat", "scom", "squaredup"}:
+                                        summary_text = ""
+                                        try:
+                                            # Prefer concise summary from payload if available
+                                            summary_text = str(payload_obj.get("summary") or payload_obj.get("name") or payload_obj.get("type") or "")[:200]
+                                        except Exception:
+                                            summary_text = ""
+                                        if not summary_text:
+                                            # Fall back to the raw line (truncated)
+                                            summary_text = (line[:200] if isinstance(line, str) else "")
+                                        # Choose os by kind for fallback
+                                        fallback_os = "network"
+                                        if kind in {"scom", "squaredup"}:
+                                            fallback_os = "windows"
+                                        _eid2 = await redis.xadd(settings.ISSUES_CANDIDATES_STREAM, {
+                                            "os": fallback_os,
+                                            "issue_key": "",
+                                            "templated_summary": summary_text,
+                                            "logs": _json.dumps([{
+                                                "templated": summary_text,
+                                                "raw": line if isinstance(line, str) else "",
+                                            }]),
+                                        })
+                                        try:
+                                            logging.getLogger("app.kaboom").info(
+                                                "norm_incident_published id=%s kind=%s os=%s", _eid2, kind, "network"
+                                            )
+                                        except Exception:
+                                            pass
+                                except Exception as e_pub2:
+                                    logging.getLogger("app.kaboom").info(
+                                        "norm_generic_incident_publish_failed kind=%s err=%s", kind, e_pub2
+                                    )
+                    # If metrics normalization is disabled, still derive basic incidents for SCOM/SquaredUp
+                    if not settings.ENABLE_METRICS_NORMALIZATION and kind in {"scom", "squaredup"}:
+                        try:
+                            import json as _json
+                            payload_obj2 = None
+                            try:
+                                payload_obj2 = _json.loads(line)
+                            except Exception:
+                                payload_obj2 = None
+                            if isinstance(payload_obj2, dict):
+                                norm_candidates2: List[Dict[str, Any]] = []
+                                if kind == "scom":
+                                    typ = str(payload_obj2.get("type") or "")
+                                    if typ == "alert":
+                                        sev = str(payload_obj2.get("Severity") or payload_obj2.get("severity") or "").lower()
+                                        name = str(payload_obj2.get("Name") or payload_obj2.get("name") or "")
+                                        src = str(payload_obj2.get("MonitoringObjectDisplayName") or "")
+                                        if sev in {"warning", "error", "critical"} or name:
+                                            norm_candidates2.append({
+                                                "os": "windows",
+                                                "raw": line,
+                                                "templated": f"scom alert {sev} {name} source={src}".strip(),
+                                            })
+                                if kind == "squaredup":
+                                    typ = str(payload_obj2.get("type") or "")
+                                    if typ == "alert":
+                                        sev = str(payload_obj2.get("severity") or "").lower()
+                                        title = str(payload_obj2.get("title") or "")
+                                        if sev in {"warning", "error", "critical"} or title:
+                                            norm_candidates2.append({
+                                                "os": "windows",
+                                                "raw": line,
+                                                "templated": f"squaredup alert {sev} {title}".strip(),
+                                            })
+                                    elif typ == "health":
+                                        state = str(payload_obj2.get("state") or payload_obj2.get("status") or "").lower()
+                                        name0 = str(payload_obj2.get("name") or "")
+                                        if state and state not in {"ok", "healthy", "green"}:
+                                            norm_candidates2.append({
+                                                "os": "windows",
+                                                "raw": line,
+                                                "templated": f"squaredup health {state} {name0}".strip(),
+                                            })
+                                # Generic fallback for these kinds
+                                if not norm_candidates2:
+                                    summary_text2 = str(payload_obj2.get("summary") or payload_obj2.get("name") or payload_obj2.get("type") or "")[:200]
+                                    if not summary_text2:
+                                        summary_text2 = (line[:200] if isinstance(line, str) else "")
+                                    norm_candidates2.append({
+                                        "os": "windows",
+                                        "raw": line,
+                                        "templated": summary_text2,
+                                    })
+                                # Publish
+                                for c2 in norm_candidates2:
+                                    logs_field2 = _json.dumps([{
+                                        "templated": c2.get("templated", ""),
+                                        "raw": c2.get("raw", ""),
+                                    }])
+                                    _eidx = await redis.xadd(settings.ISSUES_CANDIDATES_STREAM, {
+                                        "os": c2.get("os", "windows"),
+                                        "issue_key": "",
+                                        "templated_summary": c2.get("templated", "") or c2.get("raw", ""),
+                                        "logs": logs_field2,
+                                    })
+                                    try:
+                                        logging.getLogger("app.kaboom").info(
+                                            "norm_incident_published id=%s kind=%s os=%s", _eidx, kind, c2.get("os")
+                                        )
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
+
+                    # Infer domain/OS
                     os_name = _os_from_source(source)
+                    if os_name == "unknown":
+                        # Map known producer kinds to domains
+                        if kind in {"scom", "squaredup"}:
+                            os_name = "windows"
+                        elif kind in {"thousandeyes", "catalyst", "snmp", "dcim_http"}:
+                            os_name = "network"
+                        elif kind in {"redfish"}:
+                            os_name = "linux"
                     templated, parsed = _parse_and_template(os_name, line)
 
                     # Choose document text based on embedding mode
@@ -217,6 +463,14 @@ async def consume_logs():
                         })
                 except Exception as exc:
                     LOG.info("consumer message processing failed id=%s err=%s", msg_id, exc)
+                    try:
+                        logging.getLogger("app.kaboom").info(
+                            "consumer_failed id=%s source=%s kind=%s os_guess=%s err=%s line_len=%s",
+                            msg_id, data.get("source"), (data.get("source") or "").split(":",1)[0],
+                            _os_from_source(data.get("source")), exc, len((data.get("line") or "")),
+                        )
+                    except Exception:
+                        pass
                 finally:
                     ack_ids.append(msg_id)
 
@@ -235,7 +489,7 @@ async def consume_logs():
         if settings.ENABLE_PER_LINE_CANDIDATES:
             for c in candidates:
                 try:
-                    await redis.xadd(settings.ALERTS_CANDIDATES_STREAM, c)
+                    await redis.xadd(settings.ISSUES_CANDIDATES_STREAM, c)
                 except Exception as exc:
                     LOG.info("publish candidate failed stream=%s err=%s", settings.ALERTS_CANDIDATES_STREAM, exc)
 

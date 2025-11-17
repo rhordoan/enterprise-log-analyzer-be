@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import httpx
 
@@ -19,9 +19,13 @@ class ThousandEyes(ProducerPlugin):
 
     def __init__(self, cfg: dict):
         base = (cfg.get("base_url") or "").rstrip("/")
-        # Default to alerts v6 endpoint with window (e.g., 5m). Allow override via path.
+        # Back-compat single-path mode (alerts only)
         path = cfg.get("path") or "/v6/alerts.json"
         self.url = f"{base}{path}"
+        # Extended dual-path mode
+        self.alerts_path: str = cfg.get("alerts_path") or "/v6/alerts.json"
+        self.tests_path: str = cfg.get("tests_path") or "/v6/tests.json"
+        self.base = base
         self.window = cfg.get("window") or "5m"
         self.poll_interval_sec: int = int(cfg.get("poll_interval_sec") or 15)
         self.verify_ssl: bool = bool(cfg.get("verify_ssl", True))
@@ -43,14 +47,46 @@ class ThousandEyes(ProducerPlugin):
 
     async def _poll_once(self, client: httpx.AsyncClient) -> int:
         params = {"window": self.window}
+        count = 0
+        # If base is configured, prefer extended mode (alerts + tests) for richer correlation
+        if self.base:
+            # Alerts
+            aurl = f"{self.base}{self.alerts_path}"
+            aresp = await client.get(aurl, params=params, headers=self._headers())
+            aresp.raise_for_status()
+            adata: Dict[str, Any] = aresp.json()
+            alerts = adata.get("alerts") or adata.get("alert") or []
+            for a in alerts:
+                try:
+                    source = f"thousandeyes:{self.os_hint}"
+                    await safe_xadd(STREAM_NAME, {"source": source, "line": __import__("json").dumps({"type": "alert", **a})})
+                    count += 1
+                except Exception as exc:  # noqa: BLE001
+                    LOG.info("thousandeyes: failed to emit alert err=%s", exc)
+            # Tests (optional)
+            turl = f"{self.base}{self.tests_path}"
+            try:
+                tresp = await client.get(turl, headers=self._headers())
+                tresp.raise_for_status()
+                tdata = tresp.json()
+                tests: List[Dict[str, Any]] = tdata.get("test") or tdata.get("tests") or []
+                for t in tests:
+                    try:
+                        source = f"thousandeyes:{self.os_hint}"
+                        await safe_xadd(STREAM_NAME, {"source": source, "line": __import__("json").dumps({"type": "test", **t})})
+                        count += 1
+                    except Exception as exc:  # noqa: BLE001
+                        LOG.info("thousandeyes: failed to emit test err=%s", exc)
+            except Exception:
+                pass
+            return count
+        # Legacy single-path mode
         resp = await client.get(self.url, params=params, headers=self._headers())
         resp.raise_for_status()
         data: Dict[str, Any] = resp.json()
         alerts = data.get("alerts") or data.get("alert") or []
-        count = 0
         for a in alerts:
             try:
-                # Build a readable line
                 rule = a.get("ruleName") or a.get("alertType") or "alert"
                 test = a.get("testName") or a.get("testId") or ""
                 sev = a.get("severity") or a.get("level") or ""

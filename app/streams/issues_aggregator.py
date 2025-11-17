@@ -33,6 +33,11 @@ def _os_from_source(source: str | None) -> str:
     if not source:
         return "unknown"
     s = source.lower()
+    # Network-oriented producers
+    if s.startswith("thousandeyes") or s.startswith("catalyst") or s.startswith("snmp") or s.startswith("dcim_http"):
+        return "network"
+    if s.startswith("scom") or s.startswith("squaredup"):
+        return "windows"
     if "linux.log" in s:
         return "linux"
     if "mac.log" in s:
@@ -110,7 +115,14 @@ async def _close_and_publish(issue: Issue) -> None:
         "templated_summary": " \n".join([log["templated"] for log in issue.top_logs(settings.ISSUE_MAX_LOGS_FOR_LLM)]),
         "logs": __import__("json").dumps(logs_list),
     }
-    await redis.xadd(settings.ISSUES_CANDIDATES_STREAM, payload)
+    entry_id = await redis.xadd(settings.ISSUES_CANDIDATES_STREAM, payload)
+    try:
+        logging.getLogger("app.kaboom").info(
+            "aggregator_issue_published id=%s os=%s key=%s logs=%d",
+            entry_id, issue.os, issue.key, len(issue.logs)
+        )
+    except Exception:
+        pass
     LOG.info("published issue os=%s key=%s logs=%d", issue.os, issue.key, len(issue.logs))
 
 

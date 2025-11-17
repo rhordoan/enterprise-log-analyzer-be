@@ -46,6 +46,19 @@ def _proto_collection_name(os_name: str) -> str:
     return f"{settings.CHROMA_PROTO_COLLECTION_PREFIX}{_suffix_for_os(os_name)}"
 
 
+def _vector_has_values(vec) -> bool:
+    try:
+        import numpy as np  # type: ignore
+        if isinstance(vec, np.ndarray):  # noqa: SIM401
+            return bool(getattr(vec, "size", 0) > 0)
+    except Exception:
+        pass
+    try:
+        return bool(len(vec) > 0)  # type: ignore[arg-type]
+    except Exception:
+        return False
+
+
 def _get_prototype(os_name: str, cluster_id: str) -> tuple[list[float] | None, str, Dict[str, Any]]:
     collection = _get_provider().get_or_create_collection(_proto_collection_name(os_name))
     data = collection.get(ids=[cluster_id], include=["embeddings", "documents", "metadatas"]) or {}
@@ -84,9 +97,17 @@ async def run_cluster_enricher() -> None:
 
                     # neighbors from templates via centroid
                     neighbors: List[Dict[str, Any]] = []
-                    if centroid:
+                    # Avoid numpy truthiness ambiguity on arrays by coercing to list and checking size explicitly
+                    centroid_vec = centroid
+                    try:
+                        import numpy as np  # type: ignore
+                        if isinstance(centroid_vec, np.ndarray):  # noqa: SIM401
+                            centroid_vec = centroid_vec.tolist()
+                    except Exception:
+                        pass
+                    if _vector_has_values(centroid_vec):
                         tcoll = _get_provider().get_or_create_collection(collection_name_for_os(os_name))
-                        q = tcoll.query(query_embeddings=[centroid], n_results=8, include=["documents", "metadatas", "distances"]) or {}
+                        q = tcoll.query(query_embeddings=[centroid_vec], n_results=8, include=["documents", "metadatas", "distances"]) or {}
                         ids = (q.get("ids") or [[]])[0]
                         docs = (q.get("documents") or [[]])[0]
                         dists = (q.get("distances") or [[]])[0]
@@ -99,27 +120,26 @@ async def run_cluster_enricher() -> None:
                                 "metadata": metas[i] if i < len(metas) else {},
                             })
 
-                    # HYDE queries using medoid
+                    # HYDE queries using medoid (kept for future use), but retrieval will not use query()
                     seed_logs = [{"templated": medoid_doc}] if medoid_doc else []
                     queries = generate_hypothesis(os_name, medoid_doc, seed_logs, num_queries=3)
 
-                    # retrieve logs within same cluster via where filter
+                    # retrieve logs within same cluster via where filter (use get instead of query to avoid vector/text requirement)
                     retrieved: List[Dict[str, Any]] = []
                     lcoll = _get_provider().get_or_create_collection(_logs_collection_name(os_name))
-                    for qtxt in (queries or [medoid_doc] or []):
-                        try:
-                            res = lcoll.query(query_texts=[qtxt], where={"cluster_id": cluster_id}, n_results=10, include=["documents", "metadatas", "distances"]) or {}
-                        except Exception:
-                            res = {}
-                        ids = (res.get("ids") or [[]])[0]
-                        docs = (res.get("documents") or [[]])[0]
-                        metas = (res.get("metadatas") or [[]])[0]
-                        for i in range(len(ids)):
-                            retrieved.append({
-                                "id": ids[i],
-                                "templated": docs[i] if i < len(docs) else "",
-                                "raw": (metas[i] or {}).get("raw", ""),
-                            })
+                    try:
+                        res = lcoll.get(where={"cluster_id": cluster_id}, include=["documents", "metadatas"], limit=30) or {}
+                    except Exception:
+                        res = {}
+                    ids = list(res.get("ids", []))
+                    docs = list(res.get("documents", []))
+                    metas = list(res.get("metadatas", []))
+                    for i in range(len(ids)):
+                        retrieved.append({
+                            "id": ids[i],
+                            "templated": docs[i] if i < len(docs) else "",
+                            "raw": (metas[i] or {}).get("raw", ""),
+                        })
 
                     result = classify_cluster(os_name, cluster_id, medoid_doc, neighbors, retrieved)
                     
@@ -149,7 +169,15 @@ async def run_cluster_enricher() -> None:
                         "confidence": str(result.get("confidence") or ""),
                         "result": json.dumps(result),
                     }
-                    await redis.xadd(settings.ALERTS_STREAM, payload)
+                    entry_id = await redis.xadd(settings.ALERTS_STREAM, payload)
+                    try:
+                        import logging as _logging
+                        _logging.getLogger("app.kaboom").info(
+                            "alert_published id=%s os=%s type=%s cluster_id=%s",
+                            entry_id, os_name, "cluster", cluster_id
+                        )
+                    except Exception:
+                        pass
 
                     # Update prototype metadata with learned label/solution
                     try:
@@ -164,6 +192,14 @@ async def run_cluster_enricher() -> None:
                         pass
                 except Exception as exc:
                     LOG.info("cluster enricher processing failed id=%s err=%s", msg_id, exc)
+                    try:
+                        import logging as _logging
+                        _logging.getLogger("app.kaboom").info(
+                            "cluster_enricher_failed id=%s os=%s cluster_id=%s err=%s",
+                            msg_id, data.get("os"), data.get("cluster_id"), exc
+                        )
+                    except Exception:
+                        pass
                 finally:
                     try:
                         await redis.xack(settings.CLUSTERS_CANDIDATES_STREAM, group, msg_id)

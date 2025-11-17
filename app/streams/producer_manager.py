@@ -21,6 +21,10 @@ from app.streams.producers import snmp as _snmp  # noqa: F401
 from app.streams.producers import http_poller as _dcim_http  # noqa: F401
 from app.streams.producers import redfish as _redfish  # noqa: F401
 from app.streams.producers import dell_ome as _dell_ome  # noqa: F401
+from app.streams.producers import scom as _scom  # noqa: F401
+from app.streams.producers import squaredup as _squaredup  # noqa: F401
+from app.streams.producers import cisco_catalyst as _catalyst  # noqa: F401
+from app.streams.producers import bluecat as _bluecat  # noqa: F401
 
 
 LOG = logging.getLogger(__name__)

@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+faker
+python-dateutil
+reliability
+httpx
+

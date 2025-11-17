@@ -109,6 +109,16 @@ async def run_enricher():
                             logs = []
                     else:
                         logs = raw_logs or []
+                    # Fallback: synthesize a single-log incident if only 'templated'/'raw' are provided
+                    if not templated_summary and not logs:
+                        tmpl = data.get("templated")
+                        raw = data.get("raw")
+                        if tmpl or raw:
+                            logs = [{
+                                "templated": tmpl or "",
+                                "raw": raw or "",
+                            }]
+                            templated_summary = tmpl or (raw or "")
 
                     # neighbors from templates for coarse context
                     neighbors = await _retrieve_neighbors(os_name, templated_summary or (logs[0].get("templated") if logs else ""), k=8)
@@ -137,6 +147,13 @@ async def run_enricher():
                         "log_ids": json.dumps(log_ids),
                     }
                     entry_id = await redis.xadd(settings.ALERTS_STREAM, payload)
+                    try:
+                        logging.getLogger("app.kaboom").info(
+                            "alert_published id=%s os=%s type=%s",
+                            entry_id, os_name, "issue"
+                        )
+                    except Exception:
+                        pass
                     # Mirror alert into a hash with a TTL for ~24h visibility; allow persisting later
                     try:
                         key = f"alert:{entry_id}"
@@ -148,6 +165,15 @@ async def run_enricher():
                         LOG.info("failed to store alert hash id=%s err=%s", entry_id, e)
                 except Exception as exc:
                     LOG.info("enricher processing failed id=%s err=%s", msg_id, exc)
+                    try:
+                        logging.getLogger("app.kaboom").info(
+                            "enricher_failed id=%s os=%s err=%s tmpl_len=%s logs_len=%s",
+                            msg_id, data.get("os"), exc,
+                            len(data.get("templated_summary") or ""),
+                            len(data.get("logs") or ""),
+                        )
+                    except Exception:
+                        pass
                 finally:
                     try:
                         await redis.xack(settings.ISSUES_CANDIDATES_STREAM, group, msg_id)

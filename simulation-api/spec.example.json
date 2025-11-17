@@ -1,0 +1,64 @@
+{
+  "sim": {
+    "hours_per_tick": 24,
+    "damage_multiplier": 5000,
+    "seed": 42,
+    "flows_max": 300
+  },
+  "cis": [
+    {
+      "ci_id": "server-web-01",
+      "name": "server-web-01",
+      "ci_type": "server",
+      "beta": 2.5,
+      "eta": 1800,
+      "ip_address": "10.0.0.10",
+      "open_ports": [80, 443],
+      "meta": { "role": "web" },
+      "components": [
+        { "comp_id": "web01-cpu", "name": "CPU", "component_type": "cpu", "beta": 2.5, "eta": 2000 },
+        { "comp_id": "web01-ram", "name": "Memory", "component_type": "memory", "beta": 2.0, "eta": 2200 },
+        { "comp_id": "web01-disk", "name": "Disk", "component_type": "disk", "beta": 3.0, "eta": 1800 },
+        { "comp_id": "web01-nic", "name": "NIC", "component_type": "nic", "beta": 2.0, "eta": 2100 },
+        { "comp_id": "web01-mobo", "name": "Motherboard", "component_type": "motherboard", "beta": 2.0, "eta": 2500 }
+      ]
+    },
+    {
+      "ci_id": "server-db-01",
+      "name": "server-db-01",
+      "ci_type": "db",
+      "beta": 3.0,
+      "eta": 2000,
+      "ip_address": "10.0.0.20",
+      "open_ports": [5432],
+      "meta": { "role": "db" },
+      "components": [
+        { "comp_id": "db01-cpu", "name": "CPU", "component_type": "cpu", "beta": 2.5, "eta": 2000 },
+        { "comp_id": "db01-ram", "name": "Memory", "component_type": "memory", "beta": 2.0, "eta": 2400 },
+        { "comp_id": "db01-disk", "name": "Disk", "component_type": "disk", "beta": 3.0, "eta": 1600 },
+        { "comp_id": "db01-nic", "name": "NIC", "component_type": "nic", "beta": 2.0, "eta": 2100 },
+        { "comp_id": "db01-mobo", "name": "Motherboard", "component_type": "motherboard", "beta": 2.0, "eta": 2500 }
+      ]
+    },
+    {
+      "ci_id": "app-ecommerce",
+      "name": "app-ecommerce",
+      "ci_type": "app",
+      "beta": 2.0,
+      "eta": 2400,
+      "depends_on": ["server-web-01", "server-db-01"]
+    },
+    {
+      "ci_id": "te-http-1",
+      "name": "ThousandEyes HTTP Test - app-ecommerce",
+      "ci_type": "thousandeyes_test",
+      "beta": 1.5,
+      "eta": 2600,
+      "depends_on": ["app-ecommerce"]
+    }
+  ],
+  "communications": [
+    { "src": "server-web-01", "dst": "server-db-01", "dst_port": 5432 }
+  ]
+}
+

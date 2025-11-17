@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
 
 from app.core.config import settings
 from app.core.logging_config import configure_logging, install_request_logging, set_request_logs_enabled
@@ -27,6 +28,12 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_PREFIX}/openapi.json",
 )
+
+# Emit a startup breadcrumb to kaboom log to verify file logging works
+try:
+    logging.getLogger("app.kaboom").info("startup pid=%s cwd=%s", os.getpid(), os.getcwd())
+except Exception:
+    pass
 
 # Initialize request logging toggle from settings
 try:

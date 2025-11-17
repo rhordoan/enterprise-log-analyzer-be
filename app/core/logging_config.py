@@ -69,6 +69,15 @@ def configure_logging() -> None:
         },
         "handlers": {
             "console": {**handler, "formatter": "simple"},
+            "kaboom_file": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": "INFO",
+                "formatter": "simple",
+                "filename": getattr(_settings, "KABOOM_LOG_PATH", os.getenv("KABOOM_LOG_PATH", "kaboom.log")),
+                "maxBytes": 5 * 1024 * 1024,
+                "backupCount": 3,
+                "encoding": "utf-8",
+            },
         },
         "loggers": {
             "": {"handlers": ["console"], "level": log_level, "propagate": False},
@@ -80,6 +89,8 @@ def configure_logging() -> None:
             "httpcore": {"handlers": ["console"], "level": "WARNING", "propagate": False},
             "chromadb": {"handlers": ["console"], "level": "WARNING", "propagate": False},
             "chromadb.telemetry": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+            # Dedicated crash/diagnostic logger goes to file only
+            "app.kaboom": {"handlers": ["kaboom_file"], "level": "INFO", "propagate": False},
         },
     }
 

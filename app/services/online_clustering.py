@@ -56,6 +56,13 @@ def assign_or_create_cluster(
         LOG.debug("online clustering: found %d nearest prototypes", len(nearest))
     except Exception as e:
         LOG.warning("online clustering: error finding nearest prototypes: %s", e)
+        try:
+            import logging as _logging
+            _logging.getLogger("app.kaboom").info(
+                "nearest_prototype_failed os=%s text_len=%s err=%s", os_name, len(text_to_embed or ""), e
+            )
+        except Exception:
+            pass
         nearest = []
 
     distance = None
@@ -202,7 +209,16 @@ def assign_or_create_cluster(
     
     # Record new cluster creation
     if settings.ENABLE_CLUSTER_METRICS:
-        _record_online_metrics(os_name, cid, distance, is_new_cluster)
+        try:
+            _record_online_metrics(os_name, cid, distance, is_new_cluster)
+        except Exception as e:
+            try:
+                import logging as _logging
+                _logging.getLogger("app.kaboom").info(
+                    "record_online_metrics_failed os=%s cluster_id=%s err=%s", os_name, cid, e
+                )
+            except Exception:
+                pass
     
     return cid
 
