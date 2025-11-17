@@ -111,9 +111,6 @@ class Settings(BaseSettings):
     SQLALCHEMY_LOG_LEVEL: str = "WARNING"
     UVICORN_ACCESS_LOG: bool = False
 
-    # Dedicated crash/diagnostic log file
-    KABOOM_LOG_PATH: str = "kaboom.log"
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
