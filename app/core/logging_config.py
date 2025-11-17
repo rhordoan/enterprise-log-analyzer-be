@@ -73,7 +73,9 @@ def configure_logging() -> None:
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": "INFO",
                 "formatter": "simple",
-                "filename": getattr(_settings, "KABOOM_LOG_PATH", os.getenv("KABOOM_LOG_PATH", "kaboom.log")),
+                # Default to a writable location inside containers; can be overridden via
+                # KABOOM_LOG_PATH env or Settings.KABOOM_LOG_PATH.
+                "filename": getattr(_settings, "KABOOM_LOG_PATH", os.getenv("KABOOM_LOG_PATH", "/tmp/kaboom.log")),
                 "maxBytes": 5 * 1024 * 1024,
                 "backupCount": 3,
                 "encoding": "utf-8",
