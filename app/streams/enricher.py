@@ -29,7 +29,21 @@ async def _retrieve_neighbors(os_name: str, templated: str, k: int = 5) -> List[
     provider = _get_provider()
     # Query templates first; could extend to logs_<os> as well
     collection = provider.get_or_create_collection(collection_name_for_os(os_name))
-    result = collection.query(query_texts=[templated], n_results=k, include=["distances", "metadatas", "documents"])
+    # Guard empty collections to avoid hnswlib "index out of range in self" errors
+    try:
+        t_count = collection.count()  # type: ignore[attr-defined]
+        t_empty = isinstance(t_count, int) and t_count == 0
+    except Exception:
+        tpeek = collection.get(limit=1) or {}
+        t_empty = not (tpeek.get("ids") or [])
+    if t_empty:
+        return []
+
+    result = collection.query(
+        query_texts=[templated],
+        n_results=k,
+        include=["distances", "metadatas", "documents"],
+    )
     ids = (result.get("ids") or [[]])[0]
     docs = (result.get("documents") or [[]])[0]
     dists = (result.get("distances") or [[]])[0]
@@ -61,9 +75,23 @@ async def _retrieve_logs_by_queries(os_name: str, queries: List[str], k_per_quer
         return []
     provider = _get_provider()
     collection = provider.get_or_create_collection(_logs_collection_name(os_name))
+    # Guard empty collections to avoid hnswlib "index out of range in self" errors
+    try:
+        l_count = collection.count()  # type: ignore[attr-defined]
+        l_empty = isinstance(l_count, int) and l_count == 0
+    except Exception:
+        lpeek = collection.get(limit=1) or {}
+        l_empty = not (lpeek.get("ids") or [])
+    if l_empty:
+        return []
+
     out: List[Dict[str, Any]] = []
     for q in queries[:3]:
-        result = collection.query(query_texts=[q], n_results=k_per_query, include=["documents", "metadatas", "distances"])
+        result = collection.query(
+            query_texts=[q],
+            n_results=k_per_query,
+            include=["documents", "metadatas", "distances"],
+        )
         ids = (result.get("ids") or [[]])[0]
         docs = (result.get("documents") or [[]])[0]
         dists = (result.get("distances") or [[]])[0]
