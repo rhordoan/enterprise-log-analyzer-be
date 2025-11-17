@@ -64,6 +64,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# Defaults for built-in mock API (accessible via localhost inside the container)
+ENV MOCK_HOST="127.0.0.1" \
+    MOCK_PORT="8085"
+
 # Workdir inside runtime image
 WORKDIR /app
 
@@ -78,5 +82,10 @@ COPY --from=builder /app /app
 # Expose port that the service will listen on
 EXPOSE ${PORT}
 
-# Start the application using Uvicorn (use shell to expand env vars reliably)
-CMD ["/bin/sh", "-c", "uvicorn $APP_MODULE --host $HOST --port $PORT --workers 2"]
+# Add entrypoint script to start main app and mock API in parallel
+COPY docker/start.sh /usr/local/bin/start.sh
+RUN chmod +x /usr/local/bin/start.sh
+
+# Start both services (main API + mock API). Main app remains reachable at $HOST:$PORT,
+# mock API is bound to ${MOCK_HOST}:${MOCK_PORT} so the main app can call http://localhost:${MOCK_PORT}.
+CMD ["/usr/local/bin/start.sh"]
