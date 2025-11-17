@@ -26,3 +26,4 @@ def normalize_bluecat(_: str, payload: Dict[str, Any], cfg: Dict[str, Any]) -> L
 
 
 
+
