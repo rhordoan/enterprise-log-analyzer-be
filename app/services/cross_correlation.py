@@ -230,10 +230,10 @@ def compute_global_prototype_clusters_hdbscan(
         raise RuntimeError("HDBSCAN is not installed. Please install the 'hdbscan' package.")
     # Load prototypes from all OS
     provider = ChromaClientProvider()
-    p_ids: List[str] = []
-    p_docs: List[str] = []
-    p_embs: List[List[float]] = []
-    p_metas: List[Dict[str, Any]] = []
+    raw_ids: List[str] = []
+    raw_docs: List[str] = []
+    raw_embs: List[List[float]] = []
+    raw_metas: List[Dict[str, Any]] = []
 
     for os_name in ("linux", "macos", "windows", "network"):
         try:
@@ -252,10 +252,42 @@ def compute_global_prototype_clusters_hdbscan(
             meta = dict(metas0[i] or {})
             if "os" not in meta:
                 meta["os"] = os_name
-            p_ids.append(ids0[i])
-            p_docs.append(docs0[i] if i < len(docs0) else "")
-            p_embs.append(embs0[i] if i < len(embs0) else [])
-            p_metas.append(meta)
+            raw_ids.append(ids0[i])
+            raw_docs.append(docs0[i] if i < len(docs0) else "")
+            raw_embs.append(embs0[i] if i < len(embs0) else [])
+            raw_metas.append(meta)
+
+    # Sanitize embeddings to avoid numpy shape errors when some vectors are
+    # empty, nested, or have mismatched dimensions (e.g., after model changes).
+    p_ids: List[str] = []
+    p_docs: List[str] = []
+    p_embs: List[List[float]] = []
+    p_metas: List[Dict[str, Any]] = []
+    target_dim: int | None = None
+
+    for idx, emb in enumerate(raw_embs):
+        if not isinstance(emb, (list, tuple)):
+            continue
+        if not emb:
+            continue
+        # Ensure all elements are numeric
+        if not all(isinstance(x, (int, float)) for x in emb):
+            continue
+        dim = len(emb)
+        if target_dim is None:
+            target_dim = dim
+        if dim != target_dim:
+            LOG.info(
+                "hdbscan correlation: skipping prototype with dim mismatch dim=%s expected=%s id=%s",
+                dim,
+                target_dim,
+                raw_ids[idx] if idx < len(raw_ids) else "",
+            )
+            continue
+        p_ids.append(raw_ids[idx] if idx < len(raw_ids) else "")
+        p_docs.append(raw_docs[idx] if idx < len(raw_docs) else "")
+        p_embs.append(list(emb))
+        p_metas.append(raw_metas[idx] if idx < len(raw_metas) else {})
 
     if not p_embs:
         return {
