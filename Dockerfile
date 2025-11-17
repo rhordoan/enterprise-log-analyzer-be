@@ -53,6 +53,10 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     POETRY_VIRTUALENVS_CREATE=false \
+    # HuggingFace / Transformers cache paths set to a writable location inside the container
+    HF_HOME="/tmp/hf_cache" \
+    TRANSFORMERS_CACHE="/tmp/hf_cache" \
+    TORCH_HOME="/tmp/torch_cache" \
     TOKENIZERS_PARALLELISM=false \
     HF_HUB_DISABLE_TELEMETRY=1 \
     APP_MODULE="app.main:app" \
