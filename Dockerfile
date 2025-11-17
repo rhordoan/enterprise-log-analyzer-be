@@ -9,7 +9,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential gcc \
+    && apt-get install -y --no-install-recommends build-essential gcc libgomp1 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
@@ -53,9 +53,16 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     POETRY_VIRTUALENVS_CREATE=false \
+    TOKENIZERS_PARALLELISM=false \
+    HF_HUB_DISABLE_TELEMETRY=1 \
     APP_MODULE="app.main:app" \
     HOST="0.0.0.0" \
     PORT="8000"
+
+# Install runtime libs needed by Torch/Transformers and HTTPS
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Workdir inside runtime image
 WORKDIR /app
