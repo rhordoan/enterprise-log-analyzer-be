@@ -83,6 +83,9 @@ ENV PATH="/opt/venv/bin:${PATH}"
 # Copy project source
 COPY --from=builder /app /app
 
+# Ensure Chroma persistence directory exists and is writable even for non-root UIDs
+RUN mkdir -p /app/.chroma && chmod 777 /app/.chroma
+
 # Expose port that the service will listen on
 EXPOSE ${PORT}
 

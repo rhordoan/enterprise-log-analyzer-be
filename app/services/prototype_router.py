@@ -64,7 +64,7 @@ def nearest_prototype(os_name: str, templated_text: str, k: int = 3) -> List[Dic
     except Exception:
         chroma_location = "-"
 
-    # Attempt to get item count for visibility
+    # Attempt to get item count for visibility and to guard empty collections
     try:
         try:
             count = collection.count()  # type: ignore[attr-defined]
@@ -84,6 +84,15 @@ def nearest_prototype(os_name: str, templated_text: str, k: int = 3) -> List[Dic
         chroma_mode,
         chroma_location,
     )
+    # If collection appears empty, avoid querying the index to prevent
+    # hnswlib \"index out of range in self\" errors.
+    try:
+        if isinstance(count_val, int) and count_val == 0:
+            return []
+    except Exception:
+        # If we can't reliably read count, proceed but rely on downstream guards
+        pass
+
     if not templated_text:
         return []
     result = collection.query(query_texts=[templated_text], n_results=max(1, k), include=["distances", "metadatas", "documents"])
