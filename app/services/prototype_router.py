@@ -31,16 +31,30 @@ def _get_provider() -> ChromaClientProvider:
     return _provider
 
 
-def nearest_prototype(os_name: str, templated_text: str, k: int = 3) -> List[Dict[str, Any]]:
+def _coerce_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        try:
+            return " ".join(map(str, value))
+        except Exception:
+            return str(value)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def nearest_prototype(os_name: str, templated_text: str | object, k: int = 3) -> List[Dict[str, Any]]:
     """Return top-k nearest prototypes from proto_<os> with distances.
 
     Output per item: {id, document, distance, metadata}
     """
     provider = _get_provider()
     collection = provider.get_or_create_collection(_proto_collection_name(os_name))
-    if not templated_text:
+    sanitized_text = _coerce_text(templated_text)
+    if not sanitized_text:
         return []
-    result = collection.query(query_texts=[templated_text], n_results=max(1, k), include=["distances", "metadatas", "documents"])
+    result = collection.query(query_texts=[sanitized_text], n_results=max(1, k), include=["distances", "metadatas", "documents"])
     out: List[Dict[str, Any]] = []
     ids = (result.get("ids") or [[]])[0]
     docs = (result.get("documents") or [[]])[0]
