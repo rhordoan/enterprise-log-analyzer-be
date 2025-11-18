@@ -11,14 +11,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModel
 import torch
 
-# Assuming settings are configured elsewhere, for example:
-# from app.core.config import settings
-class MockSettings:
-    OPENAI_API_KEY = "your-api-key-here"
-    OPENAI_ORG_ID = "your-org-id-here"
-    OPENAI_PROJECT = "your-project-id-here"
-
-settings = MockSettings()
+from app.core.config import settings
 
 
 class SentenceTransformerEmbeddingFunction:
@@ -41,6 +34,126 @@ class SentenceTransformerEmbeddingFunction:
         return f"sentence-transformers::{self.model.get_sentence_embedding_dimension()}"
 
     # Some Chroma paths call embed_documents/embed_query when available
+    def embed_documents(self, input: Iterable[str]) -> List[List[float]]:
+        return self(list(input))
+
+    def embed_query(self, input: str) -> List[List[float]]:
+        return self([input])
+
+
+class LogBERTEmbeddingFunction:
+    """LogBERT embeddings for semantic log understanding."""
+
+    _logged_ready_keys: set[str] = set()
+
+    @staticmethod
+    def _has_meta_tensors(model: torch.nn.Module) -> bool:
+        for tensor in model.parameters():
+            if tensor.device.type == "meta":
+                return True
+        for tensor in model.buffers():
+            if tensor.device.type == "meta":
+                return True
+        return False
+
+    def __init__(self, model_name: str = "bert-base-uncased", device: str = "cpu") -> None:
+        self.model_name = model_name
+        logger = logging.getLogger(__name__)
+
+        if device == "cuda" and torch.cuda.is_available():
+            self.device = "cuda"
+        else:
+            self.device = "cpu"
+            if device == "cuda":
+                logger.warning("logbert cuda requested but not available; will use CPU")
+
+        try:
+            load_kwargs: dict[str, object] = {"trust_remote_code": True}
+
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+
+            self.model = AutoModel.from_pretrained(model_name, **load_kwargs)
+
+            if LogBERTEmbeddingFunction._has_meta_tensors(self.model):
+                logger.warning(
+                    "logbert model tensors detected on meta; reloading with safe settings model=%s",
+                    model_name,
+                )
+                fallback_kwargs = {**load_kwargs, "low_cpu_mem_usage": False}
+                fallback_kwargs["device_map"] = {"": "cpu"}
+                self.model = AutoModel.from_pretrained(model_name, **fallback_kwargs)
+
+                if LogBERTEmbeddingFunction._has_meta_tensors(self.model):
+                    raise RuntimeError("LogBERT model tensors are still on meta after fallback reload.")
+
+            if self.device != "cpu":
+                self.model = self.model.to(self.device)
+
+            self.model.eval()
+
+            if model_name not in LogBERTEmbeddingFunction._logged_ready_keys:
+                logger.info("logbert embedding provider ready model=%s device=%s", model_name, self.device)
+                LogBERTEmbeddingFunction._logged_ready_keys.add(model_name)
+        except Exception as e:
+            logger.error("logbert embedding provider failed to initialize model=%s err=%s", model_name, e)
+            raise
+
+    def _mean_pooling(self, model_output: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        token_embeddings = model_output[0]
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
+            input_mask_expanded.sum(1), min=1e-9
+        )
+
+    def __call__(self, input: Iterable[str]) -> List[List[float]]:
+        texts = list(input)
+        if not texts:
+            return []
+
+        logger = logging.getLogger(__name__)
+        logger.debug("logbert embedding: starting batch size=%d", len(texts))
+
+        encoded = self.tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors="pt",
+        )
+
+        logger.debug(
+            "logbert embedding: tokenized %d texts, input_ids shape=%s",
+            len(texts),
+            encoded["input_ids"].shape,
+        )
+
+        encoded = {k: v.to(self.device) for k, v in encoded.items()}
+
+        with torch.no_grad():
+            model_output = self.model(**encoded)
+
+        logger.debug(
+            "logbert embedding: model inference complete, output shape=%s",
+            model_output.last_hidden_state.shape,
+        )
+
+        embeddings = self._mean_pooling(model_output, encoded["attention_mask"])
+
+        embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+
+        result = embeddings.cpu().numpy().tolist()
+
+        logger.debug(
+            "logbert embedding: completed batch size=%d, embedding dim=%d",
+            len(texts),
+            len(result[0]) if result else 0,
+        )
+
+        return result
+
+    def name(self) -> str:
+        return f"logbert::{self.model_name}"
+
     def embed_documents(self, input: Iterable[str]) -> List[List[float]]:
         return self(list(input))
 
@@ -165,162 +278,4 @@ class OllamaEmbeddingFunction:
         return self(list(input))
 
     def embed_query(self, input: str) -> List[List[float]]:
-        return self([input])
-
-
-class LogBERTEmbeddingFunction:
-    """LogBERT embeddings for semantic log understanding.
-    
-    LogBERT is a BERT model fine-tuned on log data to understand log semantics
-    rather than just text similarity. It groups logs by failure mode, not syntax.
-    
-    Supported models:
-    - "bert-base-uncased": BERT base model (works well for logs)
-    - Any HuggingFace transformer model compatible with AutoModel
-    """
-    
-    _logged_ready_keys: set[str] = set()
-
-    @staticmethod
-    def _has_meta_tensors(model: torch.nn.Module) -> bool:
-        """Return True when any parameter/buffer still lives on the meta device."""
-        for tensor in model.parameters():
-            if tensor.device.type == "meta":
-                return True
-        for tensor in model.buffers():
-            if tensor.device.type == "meta":
-                return True
-        return False
-    
-    def __init__(self, model_name: str = "bert-base-uncased", device: str = "cpu") -> None:
-            """Initialize LogBERT embedding function.
-            
-            Args:
-                model_name: HuggingFace model name (default: bert-base-uncased)
-                device: "cpu" or "cuda" for GPU acceleration
-            """
-            self.model_name = model_name
-            logger = logging.getLogger(__name__)
-            
-            # Determine actual device to use (CUDA if requested and available, otherwise CPU)
-            if device == "cuda" and torch.cuda.is_available():
-                self.device = "cuda"
-            else:
-                self.device = "cpu"
-                if device == "cuda":
-                    logger.warning("logbert cuda requested but not available; will use CPU")
-
-            try:
-                load_kwargs: dict[str, object] = {
-                    "trust_remote_code": True,
-                }
-
-                # Load tokenizer
-                self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-
-                # Load model (initial attempt)
-                self.model = AutoModel.from_pretrained(model_name, **load_kwargs)
-
-                # Some torch/transformers combos leave certain tensors on meta when
-                # low_cpu_mem_usage kicks in implicitly. Detect and force a safe reload.
-                if LogBERTEmbeddingFunction._has_meta_tensors(self.model):
-                    logger.warning(
-                        "logbert model tensors detected on meta; reloading with safe settings model=%s",
-                        model_name,
-                    )
-                    fallback_kwargs = {
-                        **load_kwargs,
-                        "low_cpu_mem_usage": False,  # disable meta-based lazy init
-                    }
-                    # device_map requires accelerate (already a dependency) and ensures CPU materialization
-                    fallback_kwargs["device_map"] = {"": "cpu"}
-                    self.model = AutoModel.from_pretrained(model_name, **fallback_kwargs)
-
-                    if LogBERTEmbeddingFunction._has_meta_tensors(self.model):
-                        raise RuntimeError(
-                            "LogBERT model tensors are still on the meta device after fallback reload."
-                        )
-
-                # Move model to target device only when needed (CPU is already the default)
-                if self.device != "cpu":
-                    self.model = self.model.to(self.device)
-
-                # Evaluation mode
-                self.model.eval()
-
-                if model_name not in LogBERTEmbeddingFunction._logged_ready_keys:
-                    logger.info("logbert embedding provider ready model=%s device=%s", model_name, self.device)
-                    LogBERTEmbeddingFunction._logged_ready_keys.add(model_name)
-            except Exception as e:
-                logger.error("logbert embedding provider failed to initialize model=%s err=%s", model_name, e)
-                raise
-    
-    def _mean_pooling(self, model_output: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        """Mean pooling - take average of all token embeddings (excluding padding)."""
-        token_embeddings = model_output[0]  # First element contains all token embeddings
-        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-    
-    def __call__(self, input: Iterable[str]) -> List[List[float]]:
-        """Generate embeddings for input texts.
-
-        Args:
-            input: Iterable of log strings (raw logs, not templated)
-
-        Returns:
-            List of embeddings, each embedding is a list of floats
-        """
-        logger = logging.getLogger(__name__)
-        texts = list(input)
-        if not texts:
-            return []
-
-        logger.debug("logbert embedding: starting batch size=%d", len(texts))
-
-        # Tokenize inputs
-        encoded = self.tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            max_length=512,  # BERT's max sequence length
-            return_tensors="pt"
-        )
-
-        logger.debug("logbert embedding: tokenized %d texts, input_ids shape=%s",
-                    len(texts), encoded["input_ids"].shape)
-
-        # Move to device
-        encoded = {k: v.to(self.device) for k, v in encoded.items()}
-
-        # Generate embeddings (no gradient computation needed for inference)
-        with torch.no_grad():
-            model_output = self.model(**encoded)
-
-        logger.debug("logbert embedding: model inference complete, output shape=%s",
-                    model_output.last_hidden_state.shape)
-
-        # Mean pooling to get sentence embeddings
-        embeddings = self._mean_pooling(model_output, encoded["attention_mask"])
-
-        # Normalize embeddings (for cosine similarity)
-        embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-
-        # Convert to list of lists
-        result = embeddings.cpu().numpy().tolist()
-
-        logger.debug("logbert embedding: completed batch size=%d, embedding dim=%d",
-                    len(texts), len(result[0]) if result else 0)
-
-        return result
-    
-    def name(self) -> str:
-        """Return identifier for this embedding function."""
-        return f"logbert::{self.model_name}"
-    
-    def embed_documents(self, input: Iterable[str]) -> List[List[float]]:
-        """Chroma compatibility: embed multiple documents."""
-        return self(list(input))
-    
-    def embed_query(self, input: str) -> List[List[float]]:
-        """Chroma compatibility: embed single query."""
         return self([input])

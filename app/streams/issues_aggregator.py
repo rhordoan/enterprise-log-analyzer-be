@@ -33,11 +33,6 @@ def _os_from_source(source: str | None) -> str:
     if not source:
         return "unknown"
     s = source.lower()
-    # Network-oriented producers
-    if s.startswith("thousandeyes") or s.startswith("catalyst") or s.startswith("snmp") or s.startswith("dcim_http"):
-        return "network"
-    if s.startswith("scom") or s.startswith("squaredup"):
-        return "windows"
     if "linux.log" in s:
         return "linux"
     if "mac.log" in s:
@@ -115,14 +110,7 @@ async def _close_and_publish(issue: Issue) -> None:
         "templated_summary": " \n".join([log["templated"] for log in issue.top_logs(settings.ISSUE_MAX_LOGS_FOR_LLM)]),
         "logs": __import__("json").dumps(logs_list),
     }
-    entry_id = await redis.xadd(settings.ISSUES_CANDIDATES_STREAM, payload)
-    try:
-        logging.getLogger("app.kaboom").info(
-            "aggregator_issue_published id=%s os=%s key=%s logs=%d",
-            entry_id, issue.os, issue.key, len(issue.logs)
-        )
-    except Exception:
-        pass
+    await redis.xadd(settings.ISSUES_CANDIDATES_STREAM, payload)
     LOG.info("published issue os=%s key=%s logs=%d", issue.os, issue.key, len(issue.logs))
 
 
@@ -160,9 +148,9 @@ async def run_issues_aggregator() -> None:
                     os_name = _os_from_source(source)
                     templated, parsed = _parse_and_template(os_name, raw)
 
-                    # Online assign/create cluster for this log (pass raw for semantic clustering)
+                    # Online assign/create cluster for this templated log
                     try:
-                        cluster_id = assign_or_create_cluster(os_name, templated, raw_log=raw)
+                        cluster_id = assign_or_create_cluster(os_name, templated)
                     except Exception:
                         cluster_id = ""
 
@@ -171,11 +159,7 @@ async def run_issues_aggregator() -> None:
                         coll_name = f"{settings.CHROMA_LOG_COLLECTION_PREFIX}{os_name}"
                         collection = _get_provider().get_or_create_collection(coll_name)
                         current = collection.get(ids=[msg_id], include=["metadatas"]) or {}
-                        metas_list = current.get("metadatas") or [[]]
-                        if not metas_list or not metas_list[0]:
-                            # log doc not yet persisted; skip quietly to avoid noisy sqlite warnings
-                            continue
-                        metas = dict(metas_list[0])
+                        metas = (current.get("metadatas") or [[]])[0] or {}
                         metas["cluster_id"] = cluster_id
                         collection.update(ids=[msg_id], metadatas=[metas])
                     except Exception:
