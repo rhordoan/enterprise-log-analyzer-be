@@ -114,7 +114,6 @@ def assign_or_create_cluster(os_name: str, templated: str | object, *, threshold
                 "rationale": "online",
                 "size": 1,
                 "exemplar_count": 0,
-                "exemplars": None,
                 "created_by": "online",
             }],
         )
