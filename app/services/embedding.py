@@ -60,12 +60,8 @@ class LogBERTEmbeddingFunction:
         self.model_name = model_name
         logger = logging.getLogger(__name__)
 
-        if device == "cuda" and torch.cuda.is_available():
-            self.device = "cuda"
-        else:
-            self.device = "cpu"
-            if device == "cuda":
-                logger.warning("logbert cuda requested but not available; will use CPU")
+        # Explicitly force CPU to avoid meta tensor copy errors during initialization
+        self.device = "cpu"
 
         try:
             load_kwargs: dict[str, object] = {
@@ -84,8 +80,8 @@ class LogBERTEmbeddingFunction:
                     "verify torch/transformers versions."
                 )
 
-            if self.device != "cpu":
-                self.model = self.model.to(self.device)
+            # REMOVED: The manual move to cuda/device which causes the meta tensor error.
+            # The model is already loaded onto the CPU via device_map={"":"cpu"}.
 
             self.model.eval()
 
@@ -159,7 +155,6 @@ class LogBERTEmbeddingFunction:
         return self([input])
 
 
-# --- CORRECTED FUNCTION ---
 def embed_single_text(
     embedding_function: SentenceTransformerEmbeddingFunction, text: str
 ) -> List[List[float]]:
