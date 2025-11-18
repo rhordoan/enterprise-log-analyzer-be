@@ -60,29 +60,33 @@ class LogBERTEmbeddingFunction:
         self.model_name = model_name
         logger = logging.getLogger(__name__)
 
-        # Explicitly force CPU to avoid meta tensor copy errors during initialization
+        # Force CPU usage to avoid meta tensor/CUDA initialization errors
         self.device = "cpu"
+        if device == "cuda":
+            logger.warning("logbert cuda requested but disabled to prevent meta tensor errors; using CPU")
 
         try:
+            # Removed 'device_map' to prevent accelerate from creating meta tensors.
+            # The model will load directly to CPU memory.
             load_kwargs: dict[str, object] = {
                 "trust_remote_code": True,
                 "low_cpu_mem_usage": False,
-                "device_map": {"": "cpu"},
             }
 
             self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
             self.model = AutoModel.from_pretrained(model_name, **load_kwargs)
 
+            # Safety check: Ensure no meta tensors persist
             if LogBERTEmbeddingFunction._has_meta_tensors(self.model):
                 raise RuntimeError(
-                    "LogBERT model tensors are still on the meta device after safe reload; "
+                    "LogBERT model tensors are still on the meta device after load; "
                     "verify torch/transformers versions."
                 )
 
-            # REMOVED: The manual move to cuda/device which causes the meta tensor error.
-            # The model is already loaded onto the CPU via device_map={"":"cpu"}.
-
+            # REMOVED: self.model.to(self.device)
+            # The model is already on CPU (default behavior of from_pretrained without device_map).
+            
             self.model.eval()
 
             if model_name not in LogBERTEmbeddingFunction._logged_ready_keys:
@@ -121,6 +125,7 @@ class LogBERTEmbeddingFunction:
             encoded["input_ids"].shape,
         )
 
+        # Move inputs to the same device as the model (CPU)
         encoded = {k: v.to(self.device) for k, v in encoded.items()}
 
         with torch.no_grad():
