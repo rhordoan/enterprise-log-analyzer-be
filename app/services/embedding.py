@@ -68,23 +68,21 @@ class LogBERTEmbeddingFunction:
                 logger.warning("logbert cuda requested but not available; will use CPU")
 
         try:
-            load_kwargs: dict[str, object] = {"trust_remote_code": True}
+            load_kwargs: dict[str, object] = {
+                "trust_remote_code": True,
+                "low_cpu_mem_usage": False,
+                "device_map": {"": "cpu"},
+            }
 
             self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
             self.model = AutoModel.from_pretrained(model_name, **load_kwargs)
 
             if LogBERTEmbeddingFunction._has_meta_tensors(self.model):
-                logger.warning(
-                    "logbert model tensors detected on meta; reloading with safe settings model=%s",
-                    model_name,
+                raise RuntimeError(
+                    "LogBERT model tensors are still on the meta device after safe reload; "
+                    "verify torch/transformers versions."
                 )
-                fallback_kwargs = {**load_kwargs, "low_cpu_mem_usage": False}
-                fallback_kwargs["device_map"] = {"": "cpu"}
-                self.model = AutoModel.from_pretrained(model_name, **fallback_kwargs)
-
-                if LogBERTEmbeddingFunction._has_meta_tensors(self.model):
-                    raise RuntimeError("LogBERT model tensors are still on meta after fallback reload.")
 
             if self.device != "cpu":
                 self.model = self.model.to(self.device)

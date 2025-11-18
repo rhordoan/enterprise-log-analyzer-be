@@ -7,6 +7,7 @@ import logging
 from app.services.prototype_router import nearest_prototype
 from app.services.chroma_service import ChromaClientProvider
 from app.core.config import settings
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 LOG = logging.getLogger(__name__)
 
@@ -35,15 +36,30 @@ def _proto_collection_name(os_name: str) -> str:
     return f"{settings.CHROMA_PROTO_COLLECTION_PREFIX}{_suffix_for_os(os_name)}"
 
 
-def assign_or_create_cluster(os_name: str, templated: str, *, threshold: float | None = None) -> str:
+def _coerce_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        try:
+            return " ".join(map(str, value))
+        except Exception:
+            return str(value)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def assign_or_create_cluster(os_name: str, templated: str | object, *, threshold: float | None = None) -> str:
     """Assign templated text to nearest prototype within threshold or create a new cluster.
 
     Returns the cluster_id (prototype id).
     """
     thresh = threshold if threshold is not None else settings.ONLINE_CLUSTER_DISTANCE_THRESHOLD
 
+    text = _coerce_text(templated)
+
     try:
-        nearest = nearest_prototype(os_name, templated, k=1)
+        nearest = nearest_prototype(os_name, text, k=1)
     except Exception as exc:
         LOG.warning("online clustering: prototype lookup failed os=%s err=%s", os_name, exc)
         nearest = []
@@ -71,7 +87,7 @@ def assign_or_create_cluster(os_name: str, templated: str, *, threshold: float |
     distance = distance if distance is not None else 0.0
     
     collection_name = _proto_collection_name(os_name)
-    text_len = len(templated or "")
+    text_len = len(text or "")
     try:
         provider = _get_provider()
         collection = provider.get_or_create_collection(collection_name)
@@ -91,13 +107,14 @@ def assign_or_create_cluster(os_name: str, templated: str, *, threshold: float |
         )
         collection.add(
             ids=[cid],
-            documents=[templated],
+            documents=[text],
             metadatas=[{
                 "os": os_name,
                 "label": "unknown",
                 "rationale": "online",
                 "size": 1,
-                "exemplars": [],
+                "exemplar_count": 0,
+                "exemplars": None,
                 "created_by": "online",
             }],
         )
@@ -135,10 +152,21 @@ def _record_online_metrics(os_name: str, cluster_id: str, distance: float, is_ne
         from app.services.cluster_metrics import ClusterMetricsTracker
         
         async def _record():
-            redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-            tracker = ClusterMetricsTracker(redis_client)
-            await tracker.record_online_cluster_assignment(os_name, cluster_id, distance, is_new_cluster)
-            await redis_client.close()
+            redis_client = None
+            try:
+                redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                tracker = ClusterMetricsTracker(redis_client)
+                await tracker.record_online_cluster_assignment(os_name, cluster_id, distance, is_new_cluster)
+            except RedisConnectionError as exc:
+                LOG.debug(
+                    "online clustering: metrics skipped os=%s cluster=%s reason=redis_unreachable err=%s",
+                    os_name,
+                    cluster_id,
+                    exc,
+                )
+            finally:
+                if redis_client is not None:
+                    await redis_client.close()
         
         # Run in new event loop if needed
         try:
