@@ -180,6 +180,17 @@ class LogBERTEmbeddingFunction:
     """
     
     _logged_ready_keys: set[str] = set()
+
+    @staticmethod
+    def _has_meta_tensors(model: torch.nn.Module) -> bool:
+        """Return True when any parameter/buffer still lives on the meta device."""
+        for tensor in model.parameters():
+            if tensor.device.type == "meta":
+                return True
+        for tensor in model.buffers():
+            if tensor.device.type == "meta":
+                return True
+        return False
     
     def __init__(self, model_name: str = "bert-base-uncased", device: str = "cpu") -> None:
             """Initialize LogBERT embedding function.
@@ -200,19 +211,38 @@ class LogBERTEmbeddingFunction:
                     logger.warning("logbert cuda requested but not available; will use CPU")
 
             try:
+                load_kwargs: dict[str, object] = {
+                    "trust_remote_code": True,
+                }
+
                 # Load tokenizer
                 self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
-                # Load model on CPU first to avoid meta tensor issues
-                self.model = AutoModel.from_pretrained(
-                    model_name,
-                    trust_remote_code=True
-                )
+                # Load model (initial attempt)
+                self.model = AutoModel.from_pretrained(model_name, **load_kwargs)
 
-                # Move model to device, using to_empty() if it's on meta device
-                if next(self.model.parameters()).device.type == 'meta':
-                    self.model = self.model.to_empty(device=self.device)
-                else:
+                # Some torch/transformers combos leave certain tensors on meta when
+                # low_cpu_mem_usage kicks in implicitly. Detect and force a safe reload.
+                if LogBERTEmbeddingFunction._has_meta_tensors(self.model):
+                    logger.warning(
+                        "logbert model tensors detected on meta; reloading with safe settings model=%s",
+                        model_name,
+                    )
+                    fallback_kwargs = {
+                        **load_kwargs,
+                        "low_cpu_mem_usage": False,  # disable meta-based lazy init
+                    }
+                    # device_map requires accelerate (already a dependency) and ensures CPU materialization
+                    fallback_kwargs["device_map"] = {"": "cpu"}
+                    self.model = AutoModel.from_pretrained(model_name, **fallback_kwargs)
+
+                    if LogBERTEmbeddingFunction._has_meta_tensors(self.model):
+                        raise RuntimeError(
+                            "LogBERT model tensors are still on the meta device after fallback reload."
+                        )
+
+                # Move model to target device only when needed (CPU is already the default)
+                if self.device != "cpu":
                     self.model = self.model.to(self.device)
 
                 # Evaluation mode

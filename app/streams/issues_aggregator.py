@@ -171,7 +171,11 @@ async def run_issues_aggregator() -> None:
                         coll_name = f"{settings.CHROMA_LOG_COLLECTION_PREFIX}{os_name}"
                         collection = _get_provider().get_or_create_collection(coll_name)
                         current = collection.get(ids=[msg_id], include=["metadatas"]) or {}
-                        metas = (current.get("metadatas") or [[]])[0] or {}
+                        metas_list = current.get("metadatas") or [[]]
+                        if not metas_list or not metas_list[0]:
+                            # log doc not yet persisted; skip quietly to avoid noisy sqlite warnings
+                            continue
+                        metas = dict(metas_list[0])
                         metas["cluster_id"] = cluster_id
                         collection.update(ids=[msg_id], metadatas=[metas])
                     except Exception:

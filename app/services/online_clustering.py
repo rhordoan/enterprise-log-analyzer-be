@@ -11,6 +11,16 @@ from app.core.config import settings
 from app.core.runtime_state import is_shutting_down
 
 
+_provider: ChromaClientProvider | None = None
+
+
+def _get_provider() -> ChromaClientProvider:
+    global _provider
+    if _provider is None:
+        _provider = ChromaClientProvider()
+    return _provider
+
+
 def _suffix_for_os(os_name: str) -> str:
     key = (os_name or "").strip().lower()
     if key in {"mac", "macos", "osx"}:
@@ -132,7 +142,7 @@ def assign_or_create_cluster(
     nearest_tpl_dist_str = "n/a"
     if not nearest_id:
         try:
-            provider = ChromaClientProvider()
+            provider = _get_provider()
             tcoll = provider.get_or_create_collection(collection_name_for_os(os_name))
             # Guard empty templates collection
             try:
@@ -182,7 +192,7 @@ def assign_or_create_cluster(
     )
     
     try:
-        provider = ChromaClientProvider()
+        provider = _get_provider()
         base_name = _proto_collection_name(os_name)
         collection = provider.get_or_create_collection(base_name)
         collection.add(

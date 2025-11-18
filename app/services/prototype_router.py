@@ -95,7 +95,25 @@ def nearest_prototype(os_name: str, templated_text: str, k: int = 3) -> List[Dic
 
     if not templated_text:
         return []
-    result = collection.query(query_texts=[templated_text], n_results=max(1, k), include=["distances", "metadatas", "documents"])
+    try:
+        result = collection.query(
+            query_texts=[templated_text],
+            n_results=max(1, k),
+            include=["distances", "metadatas", "documents"],
+        )
+    except Exception as exc:
+        # hnswlib raises "index out of range in self" when the index is empty even if
+        # metadata rows already exist (frequent during cold starts before prototypes
+        # are persisted). Treat this as "no prototypes yet" instead of surfacing an error.
+        err_msg = str(exc).lower()
+        if "index out of range in self" in err_msg or "the number of elements is zero" in err_msg:
+            LOG.debug(
+                "prototype_router: empty proto collection detected os=%s name=%s; returning no matches",
+                os_name,
+                final_name,
+            )
+            return []
+        raise
     out: List[Dict[str, Any]] = []
     ids = (result.get("ids") or [[]])[0]
     docs = (result.get("documents") or [[]])[0]
