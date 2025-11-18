@@ -60,33 +60,37 @@ class LogBERTEmbeddingFunction:
         self.model_name = model_name
         logger = logging.getLogger(__name__)
 
-        # Force CPU usage to avoid meta tensor/CUDA initialization errors
+        # Force CPU to ensure stability and avoid meta/cuda mismatch errors
         self.device = "cpu"
-        if device == "cuda":
-            logger.warning("logbert cuda requested but disabled to prevent meta tensor errors; using CPU")
 
         try:
-            # Removed 'device_map' to prevent accelerate from creating meta tensors.
-            # The model will load directly to CPU memory.
+            # Minimal kwargs: removed device_map and low_cpu_mem_usage to prevent
+            # 'accelerate' from intervening and leaving tensors on the 'meta' device.
             load_kwargs: dict[str, object] = {
                 "trust_remote_code": True,
-                "low_cpu_mem_usage": False,
             }
 
             self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-
+            
+            # Standard load. Without device_map, this loads directly to CPU RAM.
             self.model = AutoModel.from_pretrained(model_name, **load_kwargs)
 
-            # Safety check: Ensure no meta tensors persist
+            # Verify that weights are actually loaded (not meta)
             if LogBERTEmbeddingFunction._has_meta_tensors(self.model):
+                logger.warning(
+                    "LogBERT model loaded with meta tensors. Attempting to force materialization to CPU."
+                )
+                # Fallback: try to force move (though usually from_pretrained should have done this)
+                # If this fails, the environment configuration for transformers/accelerate is likely forcing meta.
+                self.model.to_empty(device="cpu") 
+                # Note: to_empty initializes random weights; purely for structure. 
+                # Ideally we want real weights. If we are here, the real weights failed to load.
+                # Re-raising to alert the user is safer than using random weights.
                 raise RuntimeError(
-                    "LogBERT model tensors are still on the meta device after load; "
-                    "verify torch/transformers versions."
+                    "LogBERT model loaded as meta tensors (empty weights). "
+                    "This usually indicates an issue with 'accelerate' or 'device_map' settings in the environment."
                 )
 
-            # REMOVED: self.model.to(self.device)
-            # The model is already on CPU (default behavior of from_pretrained without device_map).
-            
             self.model.eval()
 
             if model_name not in LogBERTEmbeddingFunction._logged_ready_keys:
@@ -104,12 +108,27 @@ class LogBERTEmbeddingFunction:
         )
 
     def __call__(self, input: Iterable[str]) -> List[List[float]]:
-        texts = list(input)
-        if not texts:
+        # Chroma may pass in a variety of types here (str, list[str], tuples, etc.).
+        # Coerce everything defensively to plain strings to avoid tokenizer
+        # type errors like:
+        # "TextEncodeInput must be Union[TextInputSequence, Tuple[InputSequence, InputSequence]]"
+        raw_items = list(input)
+        if not raw_items:
             return []
 
-        logger = logging.getLogger(__name__)
-        logger.debug("logbert embedding: starting batch size=%d", len(texts))
+        texts: List[str] = []
+        for value in raw_items:
+            if isinstance(value, str):
+                texts.append(value)
+            elif isinstance(value, (list, tuple)):
+                try:
+                    texts.append(" ".join(map(str, value)))
+                except Exception:
+                    texts.append(str(value))
+            elif value is None:
+                texts.append("")
+            else:
+                texts.append(str(value))
 
         encoded = self.tokenizer(
             texts,
@@ -119,34 +138,16 @@ class LogBERTEmbeddingFunction:
             return_tensors="pt",
         )
 
-        logger.debug(
-            "logbert embedding: tokenized %d texts, input_ids shape=%s",
-            len(texts),
-            encoded["input_ids"].shape,
-        )
-
-        # Move inputs to the same device as the model (CPU)
+        # Ensure inputs are on the correct device (CPU)
         encoded = {k: v.to(self.device) for k, v in encoded.items()}
 
         with torch.no_grad():
             model_output = self.model(**encoded)
 
-        logger.debug(
-            "logbert embedding: model inference complete, output shape=%s",
-            model_output.last_hidden_state.shape,
-        )
-
         embeddings = self._mean_pooling(model_output, encoded["attention_mask"])
-
         embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
         result = embeddings.cpu().numpy().tolist()
-
-        logger.debug(
-            "logbert embedding: completed batch size=%d, embedding dim=%d",
-            len(texts),
-            len(result[0]) if result else 0,
-        )
 
         return result
 
