@@ -16,7 +16,8 @@ aiofiles = "^23.1"
 asyncpg = "^0.30.0"
 ruff = "^0.13.0"
 pydantic-settings = "^2.10.1"
-chromadb = "<=0.5.5"
+# Allow latest Chromadb again; minimum tested version is 0.5.5
+chromadb = ">=0.5.5"
 openai = ">=1.40.0"
 sentence-transformers = ">=2.2.2"
 # numpy and scikit-learn are heavy; only needed when using sentence-transformers locally

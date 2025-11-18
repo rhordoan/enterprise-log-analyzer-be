@@ -4,7 +4,12 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Query
 
-from app.services.cross_correlation import compute_global_clusters, build_graph_from_clusters, compute_global_prototype_clusters_hdbscan
+from app.core.config import settings
+from app.services.cross_correlation import (
+    compute_global_clusters,
+    build_graph_from_clusters,
+    compute_global_prototype_clusters_hdbscan,
+)
 
 router = APIRouter()
 
@@ -25,13 +30,39 @@ async def get_global_correlation(
     Default: HDBSCAN over prototypes (basis=prototypes).
     Fallback: single-pass over logs when basis=logs.
     """
+    # Preferred path: HDBSCAN over prototypes
     if basis == "prototypes" and algorithm == "hdbscan":
-        return compute_global_prototype_clusters_hdbscan(
+        proto_result = compute_global_prototype_clusters_hdbscan(
             min_cluster_size=min_cluster_size,
             min_samples=min_samples,
             include_logs_per_cluster=include_logs_per_cluster,
         )
-    # Fallback to existing logs-based single-pass clustering
+        clusters = proto_result.get("clusters") or []
+        if clusters:
+            return proto_result
+
+        # Demo-friendly fallback: if no prototype clusters found, fall back to
+        # logs-based single-pass clustering so the UI can still display something.
+        fallback_threshold = (
+            threshold if threshold is not None else settings.CLUSTER_DISTANCE_THRESHOLD
+        )
+        # Be slightly more permissive than the default to encourage forming clusters
+        default_min = getattr(settings, "CLUSTER_MIN_SIZE", 5)
+        fallback_min_size = (
+            min_size if min_size is not None else max(2, int(default_min) // 2)
+        )
+        logs_result = compute_global_clusters(
+            limit_per_source=limit_per_source,
+            threshold=fallback_threshold,
+            min_size=fallback_min_size,
+            include_logs_per_cluster=include_logs_per_cluster,
+        )
+        params = logs_result.setdefault("params", {})
+        params.setdefault("basis", "logs")
+        params.setdefault("algorithm", "single_pass")
+        return logs_result
+
+    # Explicit logs-based path (or non-HDBSCAN algorithm)
     return compute_global_clusters(
         limit_per_source=limit_per_source,
         threshold=threshold,
@@ -52,12 +83,35 @@ async def get_global_correlation_graph(
     min_samples: int | None = Query(None, description="HDBSCAN min_samples when algorithm=hdbscan (default=min_cluster_size)"),
 ) -> Dict[str, Any]:
     """Return graph representation of cross-source clusters."""
+    base: Dict[str, Any]
+
     if basis == "prototypes" and algorithm == "hdbscan":
-        base = compute_global_prototype_clusters_hdbscan(
+        proto_result = compute_global_prototype_clusters_hdbscan(
             min_cluster_size=min_cluster_size,
             min_samples=min_samples,
             include_logs_per_cluster=include_logs_per_cluster,
         )
+        clusters = proto_result.get("clusters") or []
+        if clusters:
+            base = proto_result
+        else:
+            # Same demo-friendly fallback as /correlation/global
+            fallback_threshold = (
+                threshold if threshold is not None else settings.CLUSTER_DISTANCE_THRESHOLD
+            )
+            default_min = getattr(settings, "CLUSTER_MIN_SIZE", 5)
+            fallback_min_size = (
+                min_size if min_size is not None else max(2, int(default_min) // 2)
+            )
+            base = compute_global_clusters(
+                limit_per_source=limit_per_source,
+                threshold=fallback_threshold,
+                min_size=fallback_min_size,
+                include_logs_per_cluster=include_logs_per_cluster,
+            )
+            params = base.setdefault("params", {})
+            params.setdefault("basis", "logs")
+            params.setdefault("algorithm", "single_pass")
     else:
         base = compute_global_clusters(
             limit_per_source=limit_per_source,
@@ -65,6 +119,7 @@ async def get_global_correlation_graph(
             min_size=min_size,
             include_logs_per_cluster=include_logs_per_cluster,
         )
+
     return build_graph_from_clusters(base)
 
 
